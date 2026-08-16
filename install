@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PLUGIN_ID="omarchy-google-calendar-clock"
+BUILTIN_ID="omarchy.clock"
+PLUGIN_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/omarchy/plugins/${PLUGIN_ID}"
+
+if (( $# != 1 )); then
+  echo "Usage: install <https://github.com/owner/repository.git>" >&2
+  exit 64
+fi
+
+REPOSITORY_URL=$1
+for dependency in omarchy jq; do
+  command -v "$dependency" >/dev/null || { echo "Missing required command: ${dependency}" >&2; exit 127; }
+done
+
+added=false
+cleanup_failed_install() {
+  status=$?
+  if (( status != 0 )) && $added; then
+    if (( status == 75 )); then
+      echo "The plugin remains installed but disabled so setup can be retried safely." >&2
+    else
+      omarchy plugin remove "$PLUGIN_ID" --yes >/dev/null 2>&1 || true
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup_failed_install EXIT
+
+if [[ -e "$PLUGIN_DIR" ]]; then
+  echo "${PLUGIN_ID} is already installed; its existing checkout will be used."
+else
+  omarchy plugin add "$REPOSITORY_URL" --yes
+  added=true
+fi
+
+set +e
+"${PLUGIN_DIR}/setup"
+setup_status=$?
+set -e
+if (( setup_status != 0 )); then exit "$setup_status"; fi
+
+builtin_was_enabled=false
+if omarchy plugin list --json | jq -e --arg id "$BUILTIN_ID" '.[] | select(.id == $id and .enabled == true)' >/dev/null; then
+  builtin_was_enabled=true
+  omarchy plugin disable "$BUILTIN_ID"
+fi
+
+if ! omarchy plugin enable "$PLUGIN_ID" center; then
+  if $builtin_was_enabled; then omarchy plugin enable "$BUILTIN_ID" center || true; fi
+  exit 1
+fi
+
+added=false
+echo
+echo "Omarchy Google Calendar and Clock is installed, connected, and enabled."

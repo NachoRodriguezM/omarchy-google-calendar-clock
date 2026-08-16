@@ -1,0 +1,93 @@
+name: Release patched Caldir binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CALDIR_COMMIT: 684172752f2d7dc027db8cc79a5e7ffa1cfcbf48
+  CALDIR_VERSION: 0.11.1
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release version
+        if: github.event_name == 'push'
+        run: |
+          test "${GITHUB_REF_NAME}" = "v$(jq -r .version manifest.json)"
+          ! grep -Eq '<repository-url>|<raw-install-url>' README.md
+          ! find . -type f -name '*.ics' -print -quit | grep -q .
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Prepare patched Caldir source
+        run: |
+          git clone https://github.com/t4t5/caldir.git "$RUNNER_TEMP/caldir"
+          git -C "$RUNNER_TEMP/caldir" checkout --detach "$CALDIR_COMMIT"
+          git -C "$RUNNER_TEMP/caldir" apply "$GITHUB_WORKSPACE/patches/caldir-google.patch"
+
+      - name: Build binaries
+        working-directory: ${{ runner.temp }}/caldir
+        run: cargo build --locked --release -p caldir-cli -p caldir-provider-google
+
+      - name: Package and checksum
+        run: |
+          version=$(jq -r .version manifest.json)
+          asset="omarchy-google-calendar-clock-caldir-${version}-${{ matrix.arch }}-linux.tar.gz"
+          package="$RUNNER_TEMP/package"
+          mkdir -p "$package"
+          install -m 0755 "$RUNNER_TEMP/caldir/target/release/caldir" "$package/caldir"
+          install -m 0755 "$RUNNER_TEMP/caldir/target/release/caldir-provider-google" "$package/caldir-provider-google"
+          install -m 0644 "$RUNNER_TEMP/caldir/LICENSE" "$package/CALDIR-LICENSE"
+          strip "$package/caldir" "$package/caldir-provider-google"
+          printf 'Caldir commit: %s\nCaldir version: %s\nOmarchy Google Calendar and Clock version: %s\nArchitecture: %s\n' \
+            "$CALDIR_COMMIT" "$CALDIR_VERSION" "$version" "${{ matrix.arch }}" > "$package/BUILD-INFO"
+          tar -C "$package" -czf "$asset" BUILD-INFO CALDIR-LICENSE caldir caldir-provider-google
+          sha256sum "$asset" > "${asset}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: caldir-${{ matrix.arch }}
+          path: |
+            omarchy-google-calendar-clock-caldir-*.tar.gz
+            omarchy-google-calendar-clock-caldir-*.tar.gz.sha256
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: caldir-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Attach binaries to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
