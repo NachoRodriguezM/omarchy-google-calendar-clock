@@ -93,6 +93,8 @@ Panel {
   property string calendarCreateOutput: ""
   property string calendarPushOutput: ""
   property var calendarStatusEntries: []
+  property bool calendarRuntimeMissing: false
+  property bool calendarRuntimeProbing: false
   property int calendarLoadedYear: -1
   property int calendarRequestedYear: -1
   property string calendarRangeStart: ""
@@ -138,6 +140,30 @@ Panel {
   function helperPath(name) {
     var url = String(Qt.resolvedUrl("scripts/" + name))
     return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
+
+  function setupPath() {
+    var url = String(Qt.resolvedUrl("setup"))
+    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
+
+  // Asks the runtime probe whether the Caldir binaries are installed. The
+  // result lands in calendarRuntimeMissing, which drives the setup banner
+  // and the sync-action gates.
+  function probeCalendarRuntime() {
+    if (calendarRuntimeProbeProcess.running) return
+    calendarRuntimeProbeProcess.command = [root.helperPath("calendar-runtime-check")]
+    calendarRuntimeProbeProcess.running = true
+  }
+
+  // Opens a floating terminal running the interactive setup script, which
+  // downloads the verified Caldir binaries and walks through Google OAuth.
+  // Mirrors the shell's own terminal-launcher pattern for interactive work.
+  function runCalendarSetup() {
+    if (!root.bar || typeof root.bar.run !== "function") return
+    var launcher = "omarchy-launch-floating-terminal-with-presentation"
+    root.bar.run(launcher + " " + Util.shellQuote(root.setupPath()))
+    root.close()
   }
 
 
@@ -629,6 +655,11 @@ Panel {
   function pullFromGoogle() {
     if (calendarPullProcess.running || calendarAutoPrefetchProcess.running
         || calendarScheduledRefreshProcess.running) return
+    if (root.calendarRuntimeMissing) {
+      root.probeCalendarRuntime()
+      root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      return
+    }
     calendarPulling = true
     calendarSyncMessage = "Pulling latest changes from Google…"
     calendarPullOutput = ""
@@ -640,6 +671,11 @@ Panel {
 
   function pushToGoogle() {
     if (calendarPushProcess.running) return
+    if (root.calendarRuntimeMissing) {
+      root.probeCalendarRuntime()
+      root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      return
+    }
     if (!calendarPushArmed) {
       calendarPushArmed = true
       calendarSyncMessage = "Push pending local changes to Google? Click upload again to confirm"
@@ -709,6 +745,11 @@ Panel {
 
   function checkCalendarStatus() {
     if (calendarStatusProcess.running) return
+    if (root.calendarRuntimeMissing) {
+      root.probeCalendarRuntime()
+      root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      return
+    }
     calendarStatusLoading = true
     calendarSyncMessage = "Checking sync status…"
     calendarStatusOutput = ""
@@ -882,6 +923,9 @@ Panel {
         root.calendarStatusEntries = []
         root.calendarStatusOutput = ""
         calendarReloadAfterPull.restart()
+      } else if (exitCode === 127) {
+        root.calendarRuntimeMissing = true
+        root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
       } else {
         root.calendarSyncMessage = root.calendarPullOutput || "Google pull failed"
       }
@@ -921,6 +965,10 @@ Panel {
       root.calendarScheduledRefreshing = false
       if (exitCode === 0) {
         calendarReloadAfterPull.restart()
+      } else if (exitCode === 127) {
+        root.calendarRuntimeMissing = true
+        if (root.calendarEvents.length === 0)
+          root.calendarError = "Caldir runtime is not installed — run setup first"
       } else if (root.calendarEvents.length === 0) {
         root.calendarError = root.calendarScheduledRefreshOutput || "Could not initialize the calendar cache"
       }
@@ -991,13 +1039,16 @@ Panel {
     }
     onExited: function(exitCode) {
       root.calendarPushing = false
-      root.calendarSyncMessage = exitCode === 0
-        ? "Pushed local changes to Google"
-        : (root.calendarPushOutput || "Could not push local changes to Google")
       if (exitCode === 0) {
+        root.calendarSyncMessage = "Pushed local changes to Google"
         root.calendarStatusEntries = []
         root.calendarStatusOutput = ""
         calendarReloadAfterPull.restart()
+      } else if (exitCode === 127) {
+        root.calendarRuntimeMissing = true
+        root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      } else {
+        root.calendarSyncMessage = root.calendarPushOutput || "Could not push local changes to Google"
       }
     }
   }
@@ -1038,7 +1089,16 @@ Panel {
     interval: 1200
     repeat: false
     running: true
-    onTriggered: root.refreshCalendar(root.today.getFullYear())
+    onTriggered: {
+      root.refreshCalendar(root.today.getFullYear())
+      root.probeCalendarRuntime()
+    }
+  }
+
+  // Re-probe each time the panel opens so the setup banner clears as soon
+  // as setup has finished (setup itself closes the panel).
+  onOpenedChanged: {
+    if (root.opened) root.probeCalendarRuntime()
   }
 
   Timer {
@@ -1070,9 +1130,20 @@ Panel {
       if (exitCode === 0) {
         root.calendarStatusEntries = root.parseCalendarStatus(root.calendarStatusOutput)
         root.calendarSyncMessage = root.calendarStatusEntries.length > 0 ? "" : "No pending calendar changes"
+      } else if (exitCode === 127) {
+        root.calendarRuntimeMissing = true
+        root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
       } else {
         root.calendarSyncMessage = root.calendarStatusOutput || "Could not check sync status"
       }
+    }
+  }
+
+  Process {
+    id: calendarRuntimeProbeProcess
+    onExited: function(exitCode) {
+      root.calendarRuntimeMissing = exitCode !== 0
+      root.calendarRuntimeProbing = false
     }
   }
 
@@ -1737,6 +1808,46 @@ Panel {
               height: Style.spacing.hairline
               color: root.contentForeground
               opacity: 0.12
+            }
+
+            // ---- Setup banner: shown while the Caldir runtime is missing
+            //      so Google sync is impossible. The button opens the
+            //      interactive setup script in a floating terminal.
+            Rectangle {
+              visible: root.calendarRuntimeMissing
+              width: parent.width
+              radius: Style.cornerRadius
+              color: Style.hoverFillFor(root.barForeground, root.barForeground)
+              borderSpec: Border.controlSpec("normal", root.barForeground, Color.accent)
+
+              Row {
+                anchors.fill: parent
+                anchors.margins: Style.space(6)
+                spacing: Style.space(6)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - runSetupButton.implicitWidth - parent.spacing
+                  wrapMode: Text.Wrap
+                  text: "Caldir runtime is not installed — Google sync needs setup"
+                  color: root.barForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Button {
+                  id: runSetupButton
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Run setup"
+                  fontSize: Style.font.caption
+                  horizontalPadding: Style.space(6)
+                  verticalPadding: Style.space(2)
+                  foreground: root.barForeground
+                  fontFamily: root.contentFontFamily
+                  bordered: true
+                  onClicked: root.runCalendarSetup()
+                }
+              }
             }
 
             Column {
