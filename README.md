@@ -76,11 +76,6 @@ shell startup, and pulls again every 30 minutes. Automatic refresh is
 pull-only: it never uploads local changes. The cache is stored with owner-only
 permissions at `~/.local/state/omarchy/calendar-cache.json`.
 
-Every pull also re-reads the current calendar colors from Google, because
-Caldir only records them when a calendar is connected and would otherwise
-keep showing the old palette forever. Colors that changed on the Google side
-appear in the agenda and the month grid after the next pull.
-
 The installed binaries live in `~/.local/share/omarchy-google-calendar-clock/bin` and are used
 only by this plugin. Existing system Caldir installations are left untouched.
 The release is built from pinned Caldir source plus the included compatibility
