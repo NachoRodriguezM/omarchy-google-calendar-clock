@@ -7,6 +7,9 @@ creation and editing, and can pull from or push to Google Calendar on demand.
 Calendar data and OAuth credentials stay in Caldir's local directories. This
 repository contains no calendar data, credentials, account names, or telemetry.
 
+This plugin is based on the built-in omarchy.clock plugin, and intended as a 
+replacement, it keeps all functionality from the original.
+
 ## Requirements
 
 - Omarchy with the Quattro plugin API
