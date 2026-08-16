@@ -78,7 +78,7 @@ appear in the agenda and the month grid after the next pull.
 The installed binaries live in `~/.local/share/omarchy-google-calendar-clock/bin` and are used
 only by this plugin. Existing system Caldir installations are left untouched.
 The release is built from pinned Caldir source plus the included compatibility
-patch, so recurring-instance changes and supported Google birthday title edits
+patch, so recurring-instance changes and supported edits
 work without a local Rust toolchain.
 
 ## Update or remove
