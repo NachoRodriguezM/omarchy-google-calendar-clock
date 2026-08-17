@@ -251,13 +251,12 @@ Panel {
     calendarRuntimeProbeProcess.running = true
   }
 
-  // Opens a floating terminal running the interactive setup script, which
-  // downloads the verified Caldir binaries and walks through Google OAuth.
-  // Mirrors the shell's own terminal-launcher pattern for interactive work.
-  function runCalendarSetup() {
+  // Opens a floating terminal running the selected interactive setup flow.
+  function runCalendarSetup(mode) {
     if (!root.bar || typeof root.bar.run !== "function") return
+    var hosted = String(mode || "") === "hosted"
     var launcher = "omarchy-launch-floating-terminal-with-presentation"
-    root.bar.run(launcher + " " + Util.shellQuote(root.setupPath()))
+    root.bar.run(launcher + " " + Util.shellQuote(root.setupPath()) + (hosted ? " --hosted" : ""))
     root.close()
   }
 
@@ -670,11 +669,12 @@ Panel {
     return CalendarModel.eventKeyFor(event)
   }
 
-  // The first timed event that is still to come on the displayed day — for
-  // a day in the past or future that is simply its first timed event.
+  // Highlight only the next upcoming timed event on today. Past and future
+  // days are historical/planning views, not a current-next-event state.
   function computeNextTimedEventKey() {
     var now = root.eventClock
     var isToday = root.agendaDateKey === Model.keyForDate(now)
+    if (!isToday) return ""
     var entry = root.calendarEventsByDate[root.agendaDateKey]
     if (!entry || !entry.events) return ""
     var bestKey = ""
@@ -684,7 +684,7 @@ Panel {
       if (event.all_day) continue
       var start = new Date(String(event.start || ""))
       if (isNaN(start.getTime())) continue
-      if (isToday && start.getTime() < now.getTime()) continue
+      if (start.getTime() < now.getTime()) continue
       if (bestStart < 0 || start.getTime() < bestStart) {
         bestStart = start.getTime()
         bestKey = root.eventKeyFor(event)
@@ -1986,42 +1986,67 @@ Panel {
               opacity: 0.12
             }
 
-            // ---- Setup banner: shown while the Caldir runtime is missing
-            //      so Google sync is impossible. The button opens the
-            //      interactive setup script in a floating terminal.
+            // ---- Setup choices: make the OAuth trade-off explicit before
+            //      opening the interactive terminal flow.
             BorderSurface {
               visible: root.calendarRuntimeMissing
               width: parent.width
+              height: setupChoices.implicitHeight + Style.space(12)
               radius: Style.cornerRadius
               color: Style.hoverFillFor(root.barForeground, root.barForeground)
               borderSpec: Border.controlSpec("normal", root.barForeground, Color.accent)
 
-              Row {
-                anchors.fill: parent
-                anchors.margins: Style.space(6)
+              Column {
+                id: setupChoices
+                x: Style.space(6)
+                y: Style.space(6)
+                width: parent.width - Style.space(12)
                 spacing: Style.space(6)
 
                 Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: parent.width - runSetupButton.implicitWidth - parent.spacing
+                  width: parent.width
                   wrapMode: Text.Wrap
-                  text: "Caldir runtime is not installed — Google sync needs setup"
+                  text: "Google sync needs setup. Choose how Google OAuth should work:"
                   color: root.barForeground
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
                 }
 
-                Button {
-                  id: runSetupButton
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "Run setup"
-                  fontSize: Style.font.caption
-                  horizontalPadding: Style.space(6)
-                  verticalPadding: Style.space(2)
-                  foreground: root.barForeground
-                  fontFamily: root.contentFontFamily
-                  bordered: true
-                  onClicked: root.runCalendarSetup()
+                Row {
+                  spacing: Style.space(6)
+
+                  Button {
+                    text: "Direct setup"
+                    tooltipText: "Use your own Google Cloud OAuth client"
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(2)
+                    foreground: root.barForeground
+                    fontFamily: root.contentFontFamily
+                    bordered: true
+                    onClicked: root.runCalendarSetup("direct")
+                  }
+
+                  Button {
+                    text: "Hosted setup"
+                    tooltipText: "Use caldir.org's hosted OAuth relay"
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(2)
+                    foreground: root.barForeground
+                    fontFamily: root.contentFontFamily
+                    bordered: true
+                    onClicked: root.runCalendarSetup("hosted")
+                  }
+                }
+
+                Text {
+                  width: parent.width
+                  wrapMode: Text.Wrap
+                  text: "Direct uses your own Google Cloud client and keeps token refreshes between this machine and Google. Hosted needs no client, but caldir.org relays sign-in and future token refreshes."
+                  color: Qt.darker(root.barForeground, 1.5)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
                 }
               }
             }
@@ -2408,7 +2433,7 @@ Panel {
                 // lands on what comes next without a hover-style wash.
                 Rectangle {
                   width: parent.width
-                  height: agendaEventRow.height
+                  height: Math.max(Style.space(30), agendaEventRow.implicitHeight + Style.space(8))
                   radius: Style.cornerRadius
                   color: agendaEvent.isNextEvent
                     ? Style.selectedFillFor(root.contentForeground, Color.accent)
@@ -2419,20 +2444,17 @@ Panel {
                   Row {
                     id: agendaEventRow
                     // Inset the row from the highlight frame so the border
-                    // never kisses the calendar indicator or the action
-                    // buttons, and give the glyphs a hair of bottom weight
-                    // so text reads optically centered.
+                    // clears the calendar indicator and action buttons.
                     anchors.left: parent.left
                     anchors.leftMargin: Style.space(5)
                     anchors.right: parent.right
                     anchors.rightMargin: Style.space(5)
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: 1
                     spacing: Style.space(7)
 
                     Rectangle {
                       width: Style.spacing.hairline * 2
-                      height: Math.max(Style.space(18), eventTitle.implicitHeight)
+                      height: Math.max(Style.space(22), eventTitle.implicitHeight)
                       radius: width / 2
                       color: root.displayCalendarColor(modelData)
                     }
@@ -2449,7 +2471,7 @@ Panel {
                       width: parent.width - Style.space(65) - Style.spacing.hairline * 2 - Style.space(21)
                         - (joinAgendaButton.visible ? joinAgendaButton.width + Style.space(7) : 0)
                         - (modelData.calendar_read_only ? 0 : editAgendaButton.width)
-                      height: Math.max(eventTitle.implicitHeight, Style.space(20))
+                      height: Math.max(eventTitle.implicitHeight, Style.space(22))
 
                       Text {
                         id: eventTitle
@@ -2493,7 +2515,7 @@ Button {
                       text: "JOIN"
                       fontSize: Style.font.caption
                       horizontalPadding: Style.space(6)
-                      verticalPadding: Style.space(2)
+                      verticalPadding: Style.space(3)
                       foreground: root.contentForeground
                       fontFamily: root.contentFontFamily
                       tooltipText: agendaEvent.meetingLinks.length > 0

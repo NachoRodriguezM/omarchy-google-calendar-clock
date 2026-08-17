@@ -101,9 +101,10 @@ omarchy plugin enable omarchy-google-calendar-clock center
 
 `omarchy plugin add … --enable` also works directly: the plugin runs as a
 plain clock immediately, and when you open the calendar panel it detects the
-missing Caldir runtime, shows a banner, and offers a "Run setup" button that
-starts the interactive setup in a floating terminal. Sync actions remain
-visible; until setup completes, using one shows a setup-required message.
+missing Caldir runtime, shows Direct setup and Hosted setup choices with their
+OAuth trade-off, then starts the selected interactive flow in a floating
+terminal. Sync actions remain visible; until setup completes, using one shows
+a setup-required message.
 
 Setup validates the release checksum, archive contents, binary version, OAuth
 session, selected Google calendars, first pull, and local cache before the
