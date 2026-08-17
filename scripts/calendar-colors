@@ -31,9 +31,12 @@ toml_value() {
 
 # refresh_token_for <session_file>: print a usable access token, exchanging
 # the stored refresh token when the stored access token is near expiry.
+# Direct sessions exchange through Google with their own OAuth client;
+# hosted sessions (created via `setup --hosted`) exchange through caldir.org's
+# relay, because they have no local client credentials.
 refresh_token_for() {
   local session_file=$1
-  local access_token expires_at client_id client_secret response
+  local access_token expires_at auth_mode client_id client_secret response
   access_token=$(toml_value "$session_file" access_token)
   expires_at=$(toml_value "$session_file" expires_at)
   if [[ -n "$expires_at" ]] && date -d "$expires_at" >/dev/null 2>&1 \
@@ -41,21 +44,34 @@ refresh_token_for() {
     printf '%s' "$access_token"
     return 0
   fi
-  client_id=$(toml_value "$APP_CONFIG" client_id)
-  client_secret=$(toml_value "$APP_CONFIG" client_secret)
-  [[ -n "$client_id" && -n "$client_secret" ]] || return 1
-  response=$(curl --fail --silent --show-error \
-    --data-urlencode "client_id=$client_id" \
-    --data-urlencode "client_secret=$client_secret" \
-    --data-urlencode "refresh_token=$(toml_value "$session_file" refresh_token)" \
-    --data-urlencode "grant_type=refresh_token" \
-    "https://oauth2.googleapis.com/token" 2>/dev/null) || return 1
+  auth_mode=$(toml_value "$session_file" auth_mode)
+  if [[ "$auth_mode" == "hosted" ]]; then
+    response=$(curl --fail --silent --show-error \
+      -H "Content-Type: application/json" \
+      --data @- "https://caldir.org/auth/google/refresh" 2>/dev/null <<EOF
+{"refresh_token":"$(toml_value "$session_file" refresh_token)"}
+EOF
+    ) || return 1
+  else
+    client_id=$(toml_value "$APP_CONFIG" client_id)
+    client_secret=$(toml_value "$APP_CONFIG" client_secret)
+    [[ -n "$client_id" && -n "$client_secret" ]] || return 1
+    response=$(curl --fail --silent --show-error \
+      --data-urlencode "client_id=$client_id" \
+      --data-urlencode "client_secret=$client_secret" \
+      --data-urlencode "refresh_token=$(toml_value "$session_file" refresh_token)" \
+      --data-urlencode "grant_type=refresh_token" \
+      "https://oauth2.googleapis.com/token" 2>/dev/null) || return 1
+  fi
   jq -r '.access_token // empty' <<<"$response"
 }
 
 shopt -s nullglob
 for session_file in "$SESSION_DIR"/*.toml; do
-  [[ -f "$APP_CONFIG" ]] || break
+  auth_mode=$(toml_value "$session_file" auth_mode)
+  if [[ "$auth_mode" != "hosted" ]] && [[ ! -f "$APP_CONFIG" ]]; then
+    continue
+  fi
   access_token=$(refresh_token_for "$session_file") || continue
   [[ -n "$access_token" ]] || continue
   calendar_list=$(curl --fail --silent --show-error \

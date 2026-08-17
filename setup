@@ -11,22 +11,41 @@ BIN_DIR="${INSTALL_ROOT}/bin"
 GOOGLE_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/google"
 CALDIR_WRAPPER="${SCRIPT_DIR}/scripts/calendar-caldir"
 BINARIES_ONLY=false
+HOSTED_OAUTH=false
 
 usage() {
   cat <<'EOF'
-Usage: ./setup [--binaries-only]
+Usage: ./setup [--binaries-only] [--hosted]
 
-Downloads verified Omarchy Google Calendar and Clock Caldir binaries and, unless
---binaries-only is used, guides you through direct Google OAuth setup.
+Downloads verified Omarchy Google Calendar and Clock Caldir binaries and,
+unless --binaries-only is used, guides you through Google OAuth setup.
+
+Options:
+  --binaries-only   Install the Caldir binaries and stop; do not connect
+  --hosted          Use caldir.org's hosted Google OAuth relay instead of
+                    your own Google Cloud OAuth client
+
+Auth modes:
+  default (direct)  You create a Desktop OAuth client in your own Google
+                    Cloud project. Authentication and every token refresh
+                    happen directly between this machine and Google;
+                    caldir.org is never involved.
+  --hosted          caldir.org relays Google's OAuth dance with its own
+                    client. No Google Cloud project needed, but every
+                    token refresh depends on caldir.org being reachable,
+                    and your OAuth tokens pass through their servers.
 EOF
 }
 
-case "${1:-}" in
-  "") ;;
-  --binaries-only) BINARIES_ONLY=true ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 64 ;;
-esac
+while (( $# > 0 )); do
+  case "$1" in
+    --binaries-only) BINARIES_ONLY=true ;;
+    --hosted) HOSTED_OAUTH=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 64 ;;
+  esac
+  shift
+done
 
 for dependency in curl jq tar sha256sum; do
   command -v "$dependency" >/dev/null || {
@@ -139,17 +158,40 @@ if [[ -d "$session_dir" ]] && find "$session_dir" -maxdepth 1 -type f -name '*.t
 fi
 
 if $has_session; then
-  echo "An existing local Google OAuth session was found; it will be reused."
+  echo "An existing Google OAuth session was found; it will be reused."
 else
-  cat <<'EOF'
+  if $HOSTED_OAUTH; then
+    cat <<'EOF'
 
-Google setup will now open in your browser and wait for completion.
-Choose or create a Google Cloud project, enable the Google Calendar API,
-create a Desktop OAuth client, and enter its client ID and secret when asked.
-Authentication is direct with Google; caldir.org is not used.
+You chose hosted Google OAuth: caldir.org relays the sign-in with its own
+Google Cloud client, so you do not need to create OAuth credentials.
+
+Trade-off: every access-token refresh goes through caldir.org. If that
+service is unreachable or retired, existing sessions stop syncing. Your
+OAuth tokens also pass through caldir.org's servers during each refresh.
+If you prefer direct authentication with Google, rerun setup without
+--hosted.
 
 EOF
-  "$CALDIR_WRAPPER" connect google --hosted=false
+    "$CALDIR_WRAPPER" connect google
+  else
+    cat <<'EOF'
+
+You chose direct Google OAuth: authentication happens directly between this
+machine and Google, and caldir.org is never involved. Setup will now open in
+your browser and wait for completion. Choose or create a Google Cloud
+project, enable the Google Calendar API, create a Desktop OAuth client, and
+enter its client ID and secret when asked.
+
+Trade-off: you must create your own OAuth client in Google Cloud. In return,
+no third-party service is needed now or later — token refreshes also go
+straight to Google. For an easier setup that skips the Google Cloud project
+(but routes sign-in and refreshes through caldir.org), rerun setup with
+--hosted.
+
+EOF
+    "$CALDIR_WRAPPER" connect google --hosted=false
+  fi
 fi
 
 config_json=$("$CALDIR_WRAPPER" config --json)

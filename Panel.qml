@@ -86,6 +86,24 @@ Panel {
   property bool calendarPushArmed: false
   property bool calendarStatusLoading: false
   property string calendarSyncMessage: ""
+
+  // Any calendar operation in flight: the agenda area below the grid goes
+  // inert (controls disabled) and a spinner row takes its place. The grid
+  // itself stays browsable so the popup never feels frozen.
+  readonly property bool calendarBusy: calendarPulling || calendarPushing
+    || calendarCreating || calendarMutating || calendarStatusLoading
+  readonly property string calendarBusyLabel: calendarPulling
+    ? "Pulling latest changes from Google…"
+    : calendarPushing ? "Pushing local changes to Google…"
+    : calendarCreating ? "Saving the event…"
+    : calendarMutating ? "Saving changes…"
+    : "Checking sync status…"
+  readonly property bool calendarProgressVisible: calendarBusy
+    || calendarAutoPrefetching || (calendarLoading && calendarEvents.length === 0)
+  readonly property string calendarProgressLabel: calendarBusy
+    ? calendarBusyLabel
+    : calendarAutoPrefetching ? "Extending cached calendar months…"
+    : "Loading calendar…"
   property string calendarPullOutput: ""
   property string calendarAutoPrefetchOutput: ""
   property string calendarScheduledRefreshOutput: ""
@@ -109,6 +127,20 @@ Panel {
   property bool calendarDeleteArmed: false
   property string calendarMutationOutput: ""
   property string calendarMutationAction: ""
+  property bool settingsOpen: false
+  property bool authStatusLoading: false
+  property string authStatusOutput: ""
+  property string authMode: "none"
+  property string authSession: ""
+  property string authStatusError: ""
+
+  // While any editable text control holds focus the key catcher stands down:
+  // arrow keys keep editing the field (or do nothing at a string boundary)
+  // instead of stepping the calendar month, and Tab walks the form through
+  // the window's normal focus chain.
+  readonly property bool calendarInputFocused: eventTitleField.activeFocus
+    || eventDescriptionField.activeFocus || eventTimeField.activeFocus
+    || eventRepeatCountField.activeFocus
   property string eventRepeatMode: "none"
   property string originalEventRecurrenceRule: ""
   property bool eventAllDayEditing: true
@@ -125,12 +157,42 @@ Panel {
   ]
   readonly property var agendaEvents: calendarEventsByDate[agendaDateKey]
     ? calendarEventsByDate[agendaDateKey].events : []
+  readonly property var calendarSlugs: {
+    var slugs = []
+    for (var i = 0; i < calendarEvents.length; i++) {
+      var slug = String(calendarEvents[i].calendar || "")
+      if (slug !== "" && slugs.indexOf(slug) === -1) slugs.push(slug)
+    }
+    slugs.sort()
+    return slugs
+  }
 
   // ---- Event reminders and the next-event highlight. eventClock is bumped
   //      every minute by SystemClock so both the highlight and the reminder
   //      sweep re-evaluate without polling timers.
   property date eventClock: new Date()
   property bool eventNotificationsEnabled: String(setting("eventNotifications", "true")).toLowerCase() !== "false"
+  readonly property string calendarColorMode: String(setting("calendarColorMode", "google")).toLowerCase() === "theme"
+    ? "theme" : "google"
+  readonly property int settingsCardWidth: Style.space(300)
+  readonly property int settingsCardGap: Style.gapsOut
+  readonly property bool settingsCardOnRight: panel.cardOrigin.x + panel.contentWidth
+    + settingsCardGap + settingsCardWidth <= panel.screenW - panel.margin
+  readonly property bool settingsCardOnLeft: panel.cardOrigin.x
+    - settingsCardGap - settingsCardWidth >= panel.margin
+  readonly property color themeCalendarPrimary: Color.accent
+  readonly property color themeCalendarSecondary: root.colorKey(Color.urgent) !== root.colorKey(Color.accent)
+    ? Color.urgent
+    : (root.colorKey(Color.muted) !== root.colorKey(Color.accent) ? Color.muted : Color.foreground)
+
+  onSettingsOpenChanged: {
+    if (root.settingsOpen) {
+      root.refreshAuthStatus()
+      Qt.callLater(function() { settingsCard.forceActiveFocus() })
+    } else if (root.opened) {
+      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    }
+  }
 
   // The agenda's highlighted event: the next timed event of the displayed
   // day. Today that means still upcoming; on any other day it is the first
@@ -145,6 +207,39 @@ Panel {
   function setupPath() {
     var url = String(Qt.resolvedUrl("setup"))
     return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
+
+  function toggleSettings() {
+    root.settingsOpen = !root.settingsOpen
+  }
+
+  function refreshAuthStatus() {
+    if (authStatusProcess.running) return
+    root.authStatusLoading = true
+    root.authStatusOutput = ""
+    root.authStatusError = ""
+    authStatusProcess.command = [root.helperPath("calendar-auth-mode"), "status", "--json"]
+    authStatusProcess.running = true
+  }
+
+  function switchAuthMode(mode) {
+    var target = String(mode || "")
+    if (target !== "hosted" && target !== "direct") return
+    if (target === root.authMode && root.authMode !== "none") return
+    if (!root.bar || typeof root.bar.run !== "function") return
+
+    var launcher = "omarchy-launch-floating-terminal-with-presentation"
+    var command = root.calendarRuntimeMissing
+      ? Util.shellQuote(root.setupPath()) + (target === "hosted" ? " --hosted" : "")
+      : Util.shellQuote(root.helperPath("calendar-auth-mode")) + " switch " + Util.shellQuote(target)
+    root.close()
+    root.bar.run(launcher + " " + command)
+  }
+
+  function setCalendarColorMode(mode) {
+    var next = String(mode || "") === "theme" ? "theme" : "google"
+    if (next === root.calendarColorMode) return
+    root.persistSettings({ calendarColorMode: next })
   }
 
   // Asks the runtime probe whether the Caldir binaries are installed. The
@@ -213,6 +308,7 @@ Panel {
     root.calendarSyncMessage = ""
     root.calendarPushArmed = false
     root.calendarDeleteArmed = false
+    root.settingsOpen = false
     root.expandedAgendaInstanceId = ""
     calendarPushConfirmation.stop()
     calendarDeleteConfirmation.stop()
@@ -506,10 +602,36 @@ Panel {
 
   function eventColors(dateKey) {
     var entry = calendarEventsByDate[dateKey]
-    return entry ? entry.colors : []
+    if (!entry) return []
+    if (root.calendarColorMode === "google") return entry.colors
+
+    var colors = []
+    for (var i = 0; i < entry.events.length; i++) {
+      var color = root.themeCalendarColor(String(entry.events[i].calendar || ""))
+      if (colors.indexOf(color) === -1) colors.push(color)
+    }
+    return colors
+  }
+
+  function themeCalendarColor(slug) {
+    var value = String(slug || "")
+    var index = root.calendarSlugs.indexOf(value)
+    if (index < 0) index = 0
+    return index % 2 === 0 ? root.themeCalendarPrimary : root.themeCalendarSecondary
+  }
+
+  function colorKey(color) {
+    return [color.r.toFixed(4), color.g.toFixed(4), color.b.toFixed(4), color.a.toFixed(4)].join(":")
+  }
+
+  function displayCalendarColor(event) {
+    if (root.calendarColorMode === "theme")
+      return root.themeCalendarColor(String((event && event.calendar) || ""))
+    return CalendarModel.calendarColor(event) || Color.accent
   }
 
   function calendarColorForSlug(slug) {
+    if (root.calendarColorMode === "theme") return root.themeCalendarColor(slug)
     for (var i = 0; i < calendarEvents.length; i++) {
       if (String(calendarEvents[i].calendar || "") === String(slug)) {
         var color = CalendarModel.calendarColor(calendarEvents[i])
@@ -1148,6 +1270,33 @@ Panel {
   }
 
   Process {
+    id: authStatusProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.authStatusOutput += text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.authStatusOutput += text
+    }
+    onExited: function(exitCode) {
+      root.authStatusLoading = false
+      if (exitCode !== 0) {
+        root.authStatusError = root.authStatusOutput || "Could not read Google OAuth settings"
+        return
+      }
+      try {
+        var status = JSON.parse(root.authStatusOutput)
+        root.authMode = status.mode === "hosted" ? "hosted" : (status.mode === "direct" ? "direct" : "none")
+        root.authSession = String(status.session || "")
+        root.authStatusError = ""
+      } catch (error) {
+        root.authStatusError = "Could not read Google OAuth settings"
+      }
+    }
+  }
+
+  Process {
     id: reminderProcess
     stdout: StdioCollector {
       waitForEnd: true
@@ -1170,6 +1319,20 @@ Panel {
     value: root.calendarFrozenTop >= 0 ? root.calendarFrozenTop : root.calendarCenteredTop()
   }
 
+  component SettingsChoiceButton: Button {
+    property string optionValue: ""
+    property string currentValue: ""
+    signal chosen(string value)
+
+    selected: optionValue === currentValue
+    bordered: true
+    focusable: true
+    // Keep the fill stable on hover. Button still paints its immediate hover
+    // border, but avoids the animated bright-then-dim fill transition.
+    color: selected ? Style.selectedFillFor(foreground, accent) : background
+    onClicked: chosen(optionValue)
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -1184,7 +1347,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.editingLife
+      blocked: root.editingLife || root.calendarInputFocused || root.settingsOpen
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.moveMonth(dx)
         if (dy !== 0) root.moveYear(dy)
@@ -1275,6 +1438,17 @@ Panel {
                 text: "Back to today"
                 fontFamily: root.contentFontFamily
               }
+            }
+
+            PanelActionButton {
+              anchors.top: parent.top
+              anchors.right: parent.right
+              iconText: "󰒓"
+              tooltipText: root.settingsOpen ? "Close calendar settings" : "Calendar settings"
+              foreground: root.settingsOpen ? Color.accent : root.contentForeground
+              fontFamily: root.contentFontFamily
+              focusable: true
+              onClicked: root.toggleSettings()
             }
           }
 
@@ -1731,11 +1905,13 @@ Panel {
           }
 
           // ---- Local Caldir agenda. Changes stay local until the explicit
-          // upload action is confirmed; read-only calendars remain protected.
+          //      upload action is confirmed; read-only calendars remain protected.
           Column {
+            id: agendaSection
             width: gridColumn.width
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: Style.space(6)
+            enabled: !root.calendarBusy
 
             Item {
               width: parent.width
@@ -1813,7 +1989,7 @@ Panel {
             // ---- Setup banner: shown while the Caldir runtime is missing
             //      so Google sync is impossible. The button opens the
             //      interactive setup script in a floating terminal.
-            Rectangle {
+            BorderSurface {
               visible: root.calendarRuntimeMissing
               width: parent.width
               radius: Style.cornerRadius
@@ -1920,6 +2096,7 @@ Panel {
                 foreground: root.eventMutationScope === "instance" ? Color.accent : root.contentForeground
                 fontFamily: root.contentFontFamily
                 bordered: true
+                focusable: true
                 enabled: !root.calendarMutating
                 onClicked: {
                   root.eventMutationScope = "instance"
@@ -1942,6 +2119,7 @@ Panel {
                 foreground: root.eventMutationScope === "series" ? Color.accent : root.contentForeground
                 fontFamily: root.contentFontFamily
                 bordered: true
+                focusable: true
                 enabled: !root.calendarMutating
                 onClicked: {
                   root.eventMutationScope = "series"
@@ -1985,6 +2163,7 @@ Panel {
                   foreground: root.eventRepeatMode === modelData.value ? Color.accent : root.contentForeground
                   fontFamily: root.contentFontFamily
                   bordered: true
+                  focusable: true
                   enabled: !root.calendarCreating && !root.calendarMutating
                     && !root.eventTitleOnlyEditing
                     && (!root.selectedAgendaEvent || (root.eventMutationScope === "series" && modelData.value !== "none"))
@@ -2058,6 +2237,7 @@ Panel {
                 fontFamily: root.contentFontFamily
                 fontSize: Style.font.caption
                 bordered: true
+                focusable: true
                 enabled: !root.calendarCreating && !root.calendarMutating
                   && !root.eventTitleOnlyEditing
                 onClicked: {
@@ -2116,6 +2296,7 @@ Panel {
                 tooltipText: root.selectedAgendaEvent ? "Save local changes" : "Save locally"
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
+                focusable: true
                 enabled: !root.calendarCreating && !root.calendarMutating
                 onClicked: root.saveLocalEvent()
               }
@@ -2128,6 +2309,7 @@ Panel {
                 foreground: root.calendarDeleteArmed ? Color.urgent : root.contentForeground
                 hoverColor: Color.urgent
                 fontFamily: root.contentFontFamily
+                focusable: true
                 enabled: !root.calendarCreating && !root.calendarMutating
                 onClicked: root.deleteSelectedEvent()
               }
@@ -2138,6 +2320,7 @@ Panel {
                 tooltipText: "Cancel"
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
+                focusable: true
                 enabled: !root.calendarCreating && !root.calendarMutating
                 onClicked: root.cancelEditingEvent()
               }
@@ -2180,22 +2363,6 @@ Panel {
                   event.accepted = true
                 }
               }
-            }
-
-            Text {
-              visible: root.calendarAutoPrefetching
-              text: "Extending cached calendar months…"
-              color: Qt.darker(root.contentForeground, 1.7)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            Text {
-              visible: root.calendarLoading
-              text: "Loading calendar…"
-              color: Qt.darker(root.contentForeground, 1.5)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
             }
 
             Text {
@@ -2267,7 +2434,7 @@ Panel {
                       width: Style.spacing.hairline * 2
                       height: Math.max(Style.space(18), eventTitle.implicitHeight)
                       radius: width / 2
-                      color: CalendarModel.calendarColor(modelData) || Color.accent
+                      color: root.displayCalendarColor(modelData)
                     }
 
                     Text {
@@ -2366,14 +2533,253 @@ Button {
               }
             }
 
-            // Validation and sync feedback belongs after the form/agenda so
-            // appearing text never pushes the controls the user is acting on.
+          }
+
+          // All operation progress and transient feedback uses one predictable
+          // location below the agenda. Keeping it outside agendaSection also
+          // leaves the spinner active while the agenda controls are disabled.
+          Row {
+            visible: root.calendarProgressVisible || root.calendarSyncMessage !== ""
+            width: gridColumn.width
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: statusSpinner.visible ? Style.space(6) : 0
+
             Text {
-              visible: root.calendarSyncMessage !== ""
-              width: parent.width
+              id: statusSpinner
+              visible: root.calendarProgressVisible
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰄉"
+              color: Color.accent
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              transformOrigin: Item.Center
+              rotation: 0
+              RotationAnimation on rotation {
+                from: 0
+                to: 360
+                duration: 800
+                loops: Animation.Infinite
+                running: root.calendarProgressVisible
+              }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - (statusSpinner.visible ? statusSpinner.implicitWidth + parent.spacing : 0)
               wrapMode: Text.Wrap
-              text: root.calendarSyncMessage
+              text: root.calendarProgressVisible ? root.calendarProgressLabel : root.calendarSyncMessage
               color: Qt.darker(root.contentForeground, 1.5)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+      }
+
+      BorderSurface {
+        id: settingsCard
+        visible: root.settingsOpen
+        z: 20
+        x: root.settingsCardOnRight
+          ? keyCatcher.width + panel.padding + Border.right(panel.borderSpec) + root.settingsCardGap
+          : root.settingsCardOnLeft
+            ? -panel.padding - Border.left(panel.borderSpec) - width - root.settingsCardGap
+            : keyCatcher.width - width
+        y: -panel.padding - Border.top(panel.borderSpec)
+        width: root.settingsCardWidth
+        height: settingsColumn.implicitHeight + contentTopInset + contentBottomInset
+        color: Color.popups.background
+        borderSpec: panel.borderSpec
+        padding: Style.spacing.popupPadding
+        radius: Style.cornerRadius
+
+        Keys.onEscapePressed: function(event) {
+          root.toggleSettings()
+          event.accepted = true
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          acceptedButtons: Qt.AllButtons
+        }
+
+        Column {
+          id: settingsColumn
+          x: settingsCard.contentLeftInset
+          y: settingsCard.contentTopInset
+          width: parent.width - settingsCard.contentLeftInset - settingsCard.contentRightInset
+          spacing: Style.space(10)
+
+          Item {
+            width: parent.width
+            height: Math.max(settingsTitle.implicitHeight, settingsCloseButton.implicitHeight)
+
+            Text {
+              id: settingsTitle
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "CALENDAR SETTINGS"
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+              font.letterSpacing: 1
+            }
+
+            PanelActionButton {
+              id: settingsCloseButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰅖"
+              tooltipText: "Close calendar settings"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              focusable: true
+              onClicked: root.toggleSettings()
+            }
+          }
+
+          Rectangle {
+            width: parent.width
+            height: Style.spacing.hairline
+            color: root.contentForeground
+            opacity: 0.12
+          }
+
+          Text {
+            width: parent.width
+            text: "GOOGLE OAUTH"
+            color: Qt.darker(root.contentForeground, 1.5)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.letterSpacing: 1
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: root.authStatusLoading
+              ? "Checking authentication…"
+              : root.authStatusError !== "" ? root.authStatusError
+              : root.authMode === "none" ? "Not connected"
+              : (root.authMode === "hosted" ? "Hosted" : "Direct")
+                + (root.authSession !== "" ? " · " + root.authSession : "")
+            color: Qt.darker(root.contentForeground, 1.35)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Row {
+            spacing: Style.spacing.md
+
+            SettingsChoiceButton {
+              optionValue: "hosted"
+              currentValue: root.authMode
+              text: "HOSTED"
+              tooltipText: "Authenticate through caldir.org"
+              foreground: root.contentForeground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              enabled: !root.authStatusLoading
+              onChosen: function(value) { root.switchAuthMode(value) }
+            }
+
+            SettingsChoiceButton {
+              optionValue: "direct"
+              currentValue: root.authMode
+              text: "DIRECT"
+              tooltipText: "Authenticate directly with your Google OAuth client"
+              foreground: root.contentForeground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              enabled: !root.authStatusLoading
+              onChosen: function(value) { root.switchAuthMode(value) }
+            }
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Switching signs out the current session and opens the interactive setup flow. Stored direct credentials are preserved."
+            color: Qt.darker(root.contentForeground, 1.65)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Rectangle {
+            width: parent.width
+            height: Style.spacing.hairline
+            color: root.contentForeground
+            opacity: 0.12
+          }
+
+          Text {
+            width: parent.width
+            text: "CALENDAR COLORS"
+            color: Qt.darker(root.contentForeground, 1.5)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.letterSpacing: 1
+          }
+
+          Row {
+            spacing: Style.spacing.md
+
+            SettingsChoiceButton {
+              optionValue: "google"
+              currentValue: root.calendarColorMode
+              text: "GOOGLE"
+              tooltipText: "Use each calendar's color from Google Calendar"
+              foreground: root.contentForeground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              onChosen: function(value) { root.setCalendarColorMode(value) }
+            }
+
+            SettingsChoiceButton {
+              optionValue: "theme"
+              currentValue: root.calendarColorMode
+              text: "THEME"
+              tooltipText: "Use two colors from the active Omarchy theme"
+              foreground: root.contentForeground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              onChosen: function(value) { root.setCalendarColorMode(value) }
+            }
+          }
+
+          Row {
+            visible: root.calendarColorMode === "theme"
+            spacing: Style.space(7)
+
+            Rectangle {
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(8)
+              height: width
+              radius: width / 2
+              color: root.themeCalendarPrimary
+            }
+
+            Rectangle {
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(8)
+              height: width
+              radius: width / 2
+              color: root.themeCalendarSecondary
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Follows the active Omarchy theme"
+              color: Qt.darker(root.contentForeground, 1.65)
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
             }
@@ -2383,5 +2789,3 @@ Button {
     }
   }
 }
-
-
