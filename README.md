@@ -8,6 +8,10 @@ Calendar data and OAuth credentials stay in Caldir's local directories. The
 plugin stores only an owner-readable derived event cache and includes no
 telemetry.
 
+![Main view](Preview.png)
+
+![Settings panel open](Preview3.png)
+
 ## Requirements
 
 - Omarchy with the Quattro plugin API
