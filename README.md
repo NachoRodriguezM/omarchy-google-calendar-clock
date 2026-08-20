@@ -37,8 +37,9 @@ relay instead of your own Google Cloud client:
 curl -fsSL https://raw.githubusercontent.com/NachoRodriguezM/omarchy-google-calendar-clock/main/install | bash -s -- https://github.com/NachoRodriguezM/omarchy-google-calendar-clock --hosted
 ```
 
-It installs the plugin disabled, downloads a checksum-verified Caldir build for
-your architecture, and waits while you complete Google's OAuth flow.
+It downloads a checksum-verified Caldir build for your architecture and waits
+while you complete Google's OAuth flow. Once validation succeeds, it disables
+the built-in clock, enables this widget, and fixes it at the center of the bar.
 
 ## Google setup options
 
@@ -95,8 +96,6 @@ If you prefer to run each trusted step yourself:
 ```bash
 omarchy plugin add https://github.com/NachoRodriguezM/omarchy-google-calendar-clock --yes
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/setup
-omarchy plugin disable omarchy.clock
-omarchy plugin enable omarchy-google-calendar-clock center
 ```
 
 `omarchy plugin add … --enable` also works directly: the plugin runs as a
@@ -107,8 +106,8 @@ terminal. Sync actions remain visible; until setup completes, using one shows
 a setup-required message.
 
 Setup validates the release checksum, archive contents, binary version, OAuth
-session, selected Google calendars, first pull, and local cache before the
-bootstrap enables the plugin. Before calendar validation completes, a failure
+session, selected Google calendars, first pull, and local cache before it
+enables and centers the plugin. Before calendar validation completes, a failure
 restores the previous binaries. Google provider configuration created from
 scratch is removed; pre-existing provider configuration is left untouched.
 Calendar files are never deleted. A failure after successful authorization

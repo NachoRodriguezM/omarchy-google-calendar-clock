@@ -3,6 +3,8 @@ set -euo pipefail
 umask 077
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+PLUGIN_ID="omarchy-google-calendar-clock"
+BUILTIN_ID="omarchy.clock"
 CALDIR_VERSION="0.11.1"
 DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
@@ -10,6 +12,7 @@ INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"
 BIN_DIR="${INSTALL_ROOT}/bin"
 GOOGLE_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/google"
 CALDIR_WRAPPER="${SCRIPT_DIR}/scripts/calendar-caldir"
+SHELL_CONFIG="${CONFIG_HOME}/omarchy/shell.json"
 BINARIES_ONLY=false
 HOSTED_OAUTH=false
 
@@ -47,7 +50,7 @@ while (( $# > 0 )); do
   shift
 done
 
-for dependency in curl jq tar sha256sum; do
+for dependency in curl jq tar sha256sum omarchy; do
   command -v "$dependency" >/dev/null || {
     echo "Missing required Omarchy tool: ${dependency}" >&2
     exit 127
@@ -105,6 +108,28 @@ rollback() {
   exit "$status"
 }
 trap rollback EXIT
+
+activate_plugin() {
+  omarchy plugin disable "$BUILTIN_ID"
+  if ! omarchy plugin enable "$PLUGIN_ID" --section center --index 0; then
+    omarchy plugin enable "$BUILTIN_ID" --section center --index 0 || true
+    return 1
+  fi
+
+  # The center section is only fixed at the screen midpoint when its configured
+  # anchor is present. This setup flow replaces the stock clock, so make the
+  # calendar clock that anchor after its widget has been enabled.
+  local replacement
+  replacement=$(mktemp "${SHELL_CONFIG}.tmp.XXXXXX")
+  if ! jq --arg plugin "$PLUGIN_ID" '.bar.centerAnchor = $plugin' "$SHELL_CONFIG" > "$replacement"; then
+    rm -f -- "$replacement"
+    echo "Could not set the calendar clock as the bar center anchor." >&2
+    return 1
+  fi
+  chmod --reference="$SHELL_CONFIG" "$replacement"
+  mv -- "$replacement" "$SHELL_CONFIG"
+  omarchy-shell shell reloadConfig >/dev/null 2>&1 || true
+}
 
 echo "Downloading Omarchy Google Calendar and Clock's patched Caldir ${VERSION} for ${ASSET_ARCH}..."
 curl --fail --location --silent --show-error "${RELEASE_BASE}/${ASSET}" --output "${WORK_DIR}/${ASSET}"
@@ -222,6 +247,7 @@ if ! "$CALDIR_WRAPPER" pull >/dev/null; then
   exit 75
 fi
 "${SCRIPT_DIR}/scripts/calendar-cache-update"
+activate_plugin
 
 echo
-echo "Omarchy Google Calendar and Clock setup is complete."
+echo "Omarchy Google Calendar and Clock setup is complete and centered on the bar."
