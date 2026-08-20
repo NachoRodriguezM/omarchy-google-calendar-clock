@@ -114,9 +114,9 @@ curl --fail --location --silent --show-error "${RELEASE_BASE}/${ASSET}.sha256" -
   sha256sum --check --status "${ASSET}.sha256"
 )
 
-mapfile -t archive_entries < <(tar -tzf "${WORK_DIR}/${ASSET}" | sed 's#^\./##' | sort)
-expected_entries=(BUILD-INFO CALDIR-LICENSE caldir caldir-provider-google)
-[[ "${archive_entries[*]}" == "${expected_entries[*]}" ]] || {
+expected_entries=$'BUILD-INFO\nCALDIR-LICENSE\ncaldir\ncaldir-provider-google'
+archive_entries=$(tar -tzf "${WORK_DIR}/${ASSET}" | sed 's#^\./##' | LC_ALL=C sort)
+[[ "$archive_entries" == "$expected_entries" ]] || {
   echo "The downloaded archive contains unexpected files; refusing to install it." >&2
   exit 1
 }

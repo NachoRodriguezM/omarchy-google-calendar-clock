@@ -112,6 +112,7 @@ if [[ -d "$PLUGIN_DIR" ]]; then
   omarchy plugin remove "$PLUGIN_ID" --yes
 fi
 
-omarchy plugin enable "$BUILTIN_ID" center || true
+omarchy plugin enable "$BUILTIN_ID" --section center --index 0
+omarchy bar move "$BUILTIN_ID" --section center --index 0
 echo
-echo "Uninstall complete. The built-in ${BUILTIN_ID} widget is enabled again."
+echo "Uninstall complete. The built-in ${BUILTIN_ID} widget is enabled at the center of the bar."

@@ -209,6 +209,11 @@ Panel {
     return decodeURIComponent(url.replace(/^file:\/\//, ""))
   }
 
+  function uninstallPath() {
+    var url = String(Qt.resolvedUrl("uninstall"))
+    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
+
   function toggleSettings() {
     root.settingsOpen = !root.settingsOpen
   }
@@ -258,6 +263,16 @@ Panel {
     var launcher = "omarchy-launch-floating-terminal-with-presentation"
     root.bar.run(launcher + " " + Util.shellQuote(root.setupPath()) + (hosted ? " --hosted" : ""))
     root.close()
+  }
+
+  // Full removal must remain an interactive terminal flow: it asks separately
+  // before deleting OAuth credentials or local calendar files, then restores
+  // the built-in clock in the center of the bar.
+  function runPluginUninstall() {
+    if (!root.bar || typeof root.bar.run !== "function") return
+    var launcher = "omarchy-launch-floating-terminal-with-presentation"
+    root.close()
+    root.bar.run(launcher + " " + Util.shellQuote(root.uninstallPath()))
   }
 
 
@@ -2805,6 +2820,40 @@ Button {
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
             }
+          }
+
+          Rectangle {
+            width: parent.width
+            height: Style.spacing.hairline
+            color: root.contentForeground
+            opacity: 0.12
+          }
+
+          Text {
+            width: parent.width
+            text: "REMOVE PLUGIN"
+            color: Qt.darker(root.contentForeground, 1.5)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.letterSpacing: 1
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Remove this widget, restore the built-in clock in the bar center, and choose whether to delete Google credentials and calendar data."
+            color: Qt.darker(root.contentForeground, 1.65)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Button {
+            text: "Remove plugin and data…"
+            tooltipText: "Open the interactive full-uninstall flow"
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(6)
+            verticalPadding: Style.space(2)
+            onClicked: root.runPluginUninstall()
           }
         }
       }

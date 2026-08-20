@@ -155,11 +155,17 @@ work without a local Rust toolchain.
 
 ## Update or remove
 
+To update:
+
 ```bash
 omarchy plugin update omarchy-google-calendar-clock
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/setup
-omarchy plugin remove omarchy-google-calendar-clock
-omarchy plugin enable omarchy.clock
+```
+
+To remove the plugin and its runtime:
+
+```bash
+~/.config/omarchy/plugins/omarchy-google-calendar-clock/uninstall
 ```
 
 Removing the plugin does not delete Caldir's `.ics` files, OAuth credentials,
@@ -173,8 +179,9 @@ removing the plugin:
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/uninstall
 ```
 
-It removes the verified Caldir binaries and the local event cache, asks
-separately about deleting your Google OAuth credentials and Caldir calendar
+It removes the plugin, verified Caldir binaries, and local event cache; restores
+the built-in clock to the center of the bar; and asks separately about deleting
+your Google OAuth credentials and Caldir calendar
 data, and re-enables the built-in `omarchy.clock` widget afterwards. Pass
 `--yes` to skip the prompts after reviewing the script itself.
 
