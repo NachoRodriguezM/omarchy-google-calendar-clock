@@ -67,6 +67,7 @@ current mode with:
 ```bash
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/scripts/calendar-auth-mode status --json
 ```
+You can see the chosen mode and switch from the settings panel too.
 
 ## Use
 
@@ -97,8 +98,8 @@ session.
 
 ## Remove
 
-Use the plugin’s uninstaller—do not remove it through Omarchy’s Plugins menu
-first:
+Prefer the plugin’s uninstaller to Omarchy’s Plugins menu
+removal tool:
 
 ```bash
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/uninstall
@@ -112,6 +113,12 @@ The uninstaller separately asks whether to delete Google OAuth credentials and
 local Caldir calendar data. Keeping them allows a later reinstall to reuse
 your calendar state. Pass `--yes` only after reviewing the script: it accepts
 all removal prompts.
+
+Using the removal hook in Omarchy menu removes the plugin directory, but leaves 
+the above mentioned data and does not restore the built-in clock.
+
+In the future if this hook can be pointed to a script, I'll update to have a
+cleaned uninstall experience.
 
 ## License
 
