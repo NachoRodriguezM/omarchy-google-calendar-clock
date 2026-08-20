@@ -5,7 +5,7 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PLUGIN_ID="omarchy-google-calendar-clock"
 BUILTIN_ID="omarchy.clock"
-CALDIR_VERSION="0.11.1"
+CALDIR_VERSION="0.12.0"
 DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"

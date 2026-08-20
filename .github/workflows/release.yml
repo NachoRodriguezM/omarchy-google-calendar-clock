@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 env:
-  CALDIR_COMMIT: 684172752f2d7dc027db8cc79a5e7ffa1cfcbf48
-  CALDIR_VERSION: 0.11.1
+  CALDIR_COMMIT: 65d3b5aa8a0c9eba0ffef365f14f2b41ba3d9dff
+  CALDIR_VERSION: 0.12.0
 
 jobs:
   build:
