@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omarchy-google-calendar-clock",
   "name": "Omarchy Google Calendar and Clock",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "author": "Community contributors",
   "description": "An Omarchy clock with a local-first calendar and Google sync",
   "kinds": [
