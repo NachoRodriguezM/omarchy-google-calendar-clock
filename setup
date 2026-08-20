@@ -70,6 +70,7 @@ else
     origin=$(git -C "$SCRIPT_DIR" remote get-url origin)
     repository=${origin#https://github.com/}
     repository=${repository#git@github.com:}
+    repository=${repository%/}
     repository=${repository%.git}
   fi
   [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
