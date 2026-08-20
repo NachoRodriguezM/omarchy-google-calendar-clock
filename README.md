@@ -180,7 +180,7 @@ removing the plugin:
 ```
 
 It removes the plugin, verified Caldir binaries, and local event cache; restores
-the built-in clock to the center of the bar; and asks separately about deleting
+the built-in clock as the fixed center anchor of the bar; and asks separately about deleting
 your Google OAuth credentials and Caldir calendar
 data, and re-enables the built-in `omarchy.clock` widget afterwards. Pass
 `--yes` to skip the prompts after reviewing the script itself.

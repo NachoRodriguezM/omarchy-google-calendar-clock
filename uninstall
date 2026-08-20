@@ -18,6 +18,7 @@ INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"
 GOOGLE_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/google"
 CACHE_FILE="${STATE_HOME}/omarchy/calendar-cache.json"
 DEFAULT_CALENDAR_DIR="${DATA_HOME}/caldir"
+SHELL_CONFIG="${CONFIG_HOME}/omarchy/shell.json"
 
 ASSUME_YES=false
 
@@ -60,6 +61,28 @@ confirm() {
       ""|n|N|no|NO) return 1 ;;
     esac
   done
+}
+
+restore_clock_center_anchor() {
+  [[ -f "$SHELL_CONFIG" ]] || return 0
+
+  # Only undo the anchor this plugin set. If the user chose another widget as
+  # their anchor after installing us, preserve that preference.
+  local replacement
+  replacement=$(mktemp "${SHELL_CONFIG}.tmp.XXXXXX")
+  if ! jq --arg plugin "$PLUGIN_ID" --arg builtin "$BUILTIN_ID" '
+    if (.bar.centerAnchor // "") == $plugin then
+      .bar.centerAnchor = $builtin
+    else
+      .
+    end
+  ' "$SHELL_CONFIG" > "$replacement"; then
+    rm -f -- "$replacement"
+    echo "Could not restore the bar center anchor." >&2
+    return 1
+  fi
+  chmod --reference="$SHELL_CONFIG" "$replacement"
+  mv -- "$replacement" "$SHELL_CONFIG"
 }
 
 echo "This removes Omarchy Google Calendar and Clock and what its setup installed."
@@ -114,5 +137,6 @@ fi
 
 omarchy plugin enable "$BUILTIN_ID" --section center --index 0
 omarchy bar move "$BUILTIN_ID" --section center --index 0
+restore_clock_center_anchor
 echo
 echo "Uninstall complete. The built-in ${BUILTIN_ID} widget is enabled at the center of the bar."
