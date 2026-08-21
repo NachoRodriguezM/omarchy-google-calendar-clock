@@ -21,6 +21,10 @@ telemetry.
 The plugin downloads its own patched Caldir runtime; no Rust toolchain or
 separate Caldir installation is required.
 
+Each release includes one committed SHA-256 digest per architecture. Setup
+verifies the downloaded archive against the digest in the installed plugin
+checkout before extracting or executing it.
+
 ## Install and set up
 
 Add and enable the plugin with Omarchy:

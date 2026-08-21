@@ -65,6 +65,24 @@ case "$(uname -m)" in
 esac
 
 ASSET="omarchy-google-calendar-clock-caldir-${VERSION}-${ASSET_ARCH}-linux.tar.gz"
+RELEASE_MANIFEST="${SCRIPT_DIR}/release-assets/v${VERSION}.json"
+[[ -f "$RELEASE_MANIFEST" ]] || {
+  echo "No committed release manifest exists for plugin version ${VERSION}." >&2
+  echo "Refusing to download or execute an unbound Caldir asset." >&2
+  exit 1
+}
+EXPECTED_SHA256=$(jq -er --arg version "$VERSION" --arg asset "$ASSET" '
+  if .schemaVersion == 1
+    and .pluginVersion == $version
+    and (.assets | type == "object")
+    and (.assets[$asset] | type == "string" and test("^[0-9a-f]{64}$"))
+  then .assets[$asset]
+  else empty
+  end
+' "$RELEASE_MANIFEST") || {
+  echo "The committed release manifest has no valid digest for ${ASSET}." >&2
+  exit 1
+}
 if [[ -n "${CALENDAR_CLOCK_ASSET_BASE_URL:-}" ]]; then
   RELEASE_BASE=${CALENDAR_CLOCK_ASSET_BASE_URL%/}
 else
@@ -133,11 +151,9 @@ activate_plugin() {
 
 echo "Downloading Omarchy Google Calendar and Clock's patched Caldir ${VERSION} for ${ASSET_ARCH}..."
 curl --fail --location --silent --show-error "${RELEASE_BASE}/${ASSET}" --output "${WORK_DIR}/${ASSET}"
-curl --fail --location --silent --show-error "${RELEASE_BASE}/${ASSET}.sha256" --output "${WORK_DIR}/${ASSET}.sha256"
-
-(
+printf '%s  %s\n' "$EXPECTED_SHA256" "$ASSET" | (
   cd "$WORK_DIR"
-  sha256sum --check --status "${ASSET}.sha256"
+  sha256sum --check --status -
 )
 
 expected_entries=$'BUILD-INFO\nCALDIR-LICENSE\ncaldir\ncaldir-provider-google'
