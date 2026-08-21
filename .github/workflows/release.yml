@@ -123,7 +123,7 @@ jobs:
           jq -n \
             --arg version "$VERSION" \
             --arg source "$SOURCE_COMMIT" \
-            --argjson assets "$(for asset in "$RUNNER_TEMP"/release-assets/*.tar.gz; do printf '%s\t%s\n' "$(basename "$asset")" "$(sha256sum "$asset" | cut -d' ' -f1)"; done | jq -Rn '[inputs | split("\\t") | {key: .[0], value: .[1]}] | from_entries')" \
+            --argjson assets "$(for asset in "$RUNNER_TEMP"/release-assets/*.tar.gz; do printf '%s\t%s\n' "$(basename "$asset")" "$(sha256sum "$asset" | cut -d' ' -f1)"; done | jq -Rn '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries')" \
             '{schemaVersion: 1, pluginVersion: $version, pluginSourceCommit: $source, assets: $assets}' > "$manifest"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
