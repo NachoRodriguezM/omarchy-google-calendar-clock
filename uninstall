@@ -16,6 +16,7 @@ CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 STATE_HOME="${XDG_STATE_HOME:-${HOME}/.local/state}"
 INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"
 GOOGLE_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/google"
+ICLOUD_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/icloud"
 CACHE_FILE="${STATE_HOME}/omarchy/calendar-cache.json"
 DEFAULT_CALENDAR_DIR="${DATA_HOME}/caldir"
 SHELL_CONFIG="${CONFIG_HOME}/omarchy/shell.json"
@@ -27,8 +28,8 @@ usage() {
 Usage: ./uninstall [--yes]
 
 Removes the plugin, its downloaded Caldir binaries, and its local event
-cache. Deleting Google OAuth credentials and Caldir calendar data always
-requires a separate confirmation.
+cache. Deleting provider credentials and Caldir calendar data always requires
+a separate confirmation.
 EOF
 }
 
@@ -85,8 +86,20 @@ restore_clock_center_anchor() {
   mv -- "$replacement" "$SHELL_CONFIG"
 }
 
+delete_provider_credentials() {
+  local label="$1"
+  local path="$2"
+  [[ -d "$path" ]] || return 0
+  if confirm "Delete ${label} credentials in ${path}?"; then
+    rm -rf -- "$path"
+    echo "Deleted ${label} credentials."
+  else
+    echo "Kept ${label} credentials."
+  fi
+}
+
 echo "This removes Omarchy Google Calendar and Clock and what its setup installed."
-echo "Caldir calendar files (.ics) and Google OAuth credentials are kept unless"
+echo "Caldir calendar files (.ics) and provider credentials are kept unless"
 echo "you confirm deleting them separately."
 confirm "Remove Omarchy Google Calendar and Clock now?" || {
   echo "Aborted; nothing was removed."
@@ -112,14 +125,8 @@ if [[ -e "$CACHE_FILE" ]]; then
   echo "Removed the local event cache (${CACHE_FILE})."
 fi
 
-if [[ -d "$GOOGLE_CONFIG_DIR" ]]; then
-  if confirm "Delete Google OAuth credentials in ${GOOGLE_CONFIG_DIR}?"; then
-    rm -rf -- "$GOOGLE_CONFIG_DIR"
-    echo "Deleted Google OAuth credentials."
-  else
-    echo "Kept Google OAuth credentials."
-  fi
-fi
+delete_provider_credentials "Google OAuth" "$GOOGLE_CONFIG_DIR"
+delete_provider_credentials "iCloud" "$ICLOUD_CONFIG_DIR"
 
 if [[ -n "$calendar_dir" && -d "$calendar_dir" ]]; then
   echo "Caldir keeps your calendar files in ${calendar_dir}."

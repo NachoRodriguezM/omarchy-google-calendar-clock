@@ -2,7 +2,8 @@
 
 An Omarchy bar clock with a local-first calendar. It reads standard `.ics`
 files through [Caldir](https://github.com/t4t5/caldir), supports local event
-creation and editing, and can pull from or push to Google Calendar on demand.
+creation and editing, and can pull from or push to Google Calendar or iCloud
+on demand.
 
 Calendar data and OAuth credentials stay in Caldir's local directories. The
 plugin stores only an owner-readable derived event cache and includes no
@@ -16,7 +17,7 @@ telemetry.
 
 - Omarchy with the Quattro plugin API
 - An x86-64 or ARM64 Linux system
-- A Google account for Google sync
+- A Google account for Google sync, or an Apple account for iCloud sync
 
 The plugin downloads its own patched Caldir runtime; no Rust toolchain or
 separate Caldir installation is required.
@@ -34,21 +35,22 @@ omarchy plugin add https://github.com/NachoRodriguezM/omarchy-google-calendar-cl
 ```
 
 It initially behaves as a plain clock. Click it to open the calendar, then
-select **Direct setup** or **Hosted setup**. The selected flow opens in a
-terminal and guides you through the remaining steps.
+select **Google Direct**, **Google Hosted**, or **iCloud**. The selected flow
+opens in a terminal and guides you through the remaining steps.
 
 You can run the same setup from a terminal:
 
 ```bash
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/setup          # Direct
 ~/.config/omarchy/plugins/omarchy-google-calendar-clock/setup --hosted # Hosted
+~/.config/omarchy/plugins/omarchy-google-calendar-clock/setup --provider icloud
 ```
 
-After setup verifies the release, Google connection, and first calendar pull,
-it disables the built-in clock, enables this widget, and anchors it at the
-exact center of the bar.
+After setup verifies the release, the selected provider connection, and the
+first calendar pull, it disables the built-in clock, enables this widget, and
+anchors it at the exact center of the bar.
 
-### Choose an OAuth mode
+### Google OAuth modes
 
 **Direct (default, recommended).** You create a Desktop OAuth client in your
 own Google Cloud project. Authentication and token refreshes go directly
@@ -60,6 +62,12 @@ caldir.org, and OAuth tokens pass through its servers.
 
 The setup flow explains the same choice before it proceeds. An existing OAuth
 session is reused; it is not recreated on every setup run.
+
+### Connect iCloud
+
+Run setup with `--provider icloud`, or choose **iCloud** from the widget UI.
+Caldir connects through CalDAV, so it asks for your Apple ID and an
+app-specific password from account.apple.com.
 
 ### Switch modes later
 
@@ -81,13 +89,18 @@ You can see the chosen mode and switch from the settings panel too.
 
 Click the clock to open the calendar. The toolbar lets you:
 
-- create an event (`+`);
+- create an event in any writable local calendar (`+`);
 - preview local and remote differences (`✓`);
-- pull from Google (`↓`);
+- pull from connected calendars (`↓`);
 - push local changes after confirmation (`↑`).
 
-The settings button can switch OAuth mode, choose Google or theme calendar
-colors, and open the interactive full-uninstall flow.
+The settings button can add Google or iCloud calendars, switch Google OAuth
+mode, choose provider or theme calendar colors, and open the interactive
+full-uninstall flow.
+
+When editing an event, the form also lets you move it to another writable
+calendar. Moving one occurrence of a recurring series detaches just that
+occurrence into the destination calendar.
 
 The plugin reads its local cache immediately, refreshes in the background at
 shell startup, and pulls every 30 minutes. Automatic refresh never pushes your
@@ -117,10 +130,10 @@ It removes the plugin, its downloaded Caldir runtime, and its event cache. It
 then restores the built-in `omarchy.clock` as the fixed center anchor of the
 bar.
 
-The uninstaller separately asks whether to delete Google OAuth credentials and
-local Caldir calendar data. Keeping them allows a later reinstall to reuse
-your calendar state. Pass `--yes` only after reviewing the script: it accepts
-all removal prompts.
+The uninstaller separately asks whether to delete Google OAuth credentials,
+iCloud credentials, and local Caldir calendar data. Keeping them allows a
+later reinstall to reuse your calendar state. Pass `--yes` only after
+reviewing the script: it accepts all removal prompts.
 
 Using the removal hook in Omarchy menu removes the plugin directory, but leaves 
 the above mentioned data and does not restore the built-in clock.
