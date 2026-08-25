@@ -76,6 +76,7 @@ Panel {
   // timezone parsing in the shell.
   property var calendarEvents: []
   property var calendarEventsByDate: ({})
+  property var calendarCatalog: []
   property string calendarError: ""
   property bool calendarLoading: false
   property bool calendarPulling: false
@@ -93,8 +94,8 @@ Panel {
   readonly property bool calendarBusy: calendarPulling || calendarPushing
     || calendarCreating || calendarMutating || calendarStatusLoading
   readonly property string calendarBusyLabel: calendarPulling
-    ? "Pulling latest changes from Google…"
-    : calendarPushing ? "Pushing local changes to Google…"
+    ? "Pulling latest changes from connected calendars…"
+    : calendarPushing ? "Pushing local changes to connected calendars…"
     : calendarCreating ? "Saving the event…"
     : calendarMutating ? "Saving changes…"
     : "Checking sync status…"
@@ -117,10 +118,12 @@ Panel {
   property int calendarRequestedYear: -1
   property string calendarRangeStart: ""
   property string calendarRangeEnd: ""
+  property string defaultCalendarSlug: ""
   readonly property string lastCalendarPull: String(setting("lastCalendarPull", ""))
   readonly property int calendarPrefetchMonths: Math.max(1, Math.min(24, parseInt(setting("calendarPrefetchMonths", 6), 10) || 6))
   property string agendaDateKey: todayKey
   property bool editingEvent: false
+  property string editingCalendarSlug: ""
   property var selectedAgendaEvent: null
   property string eventMutationScope: "instance"
   property bool calendarMutating: false
@@ -157,6 +160,13 @@ Panel {
   ]
   readonly property var agendaEvents: calendarEventsByDate[agendaDateKey]
     ? calendarEventsByDate[agendaDateKey].events : []
+  readonly property var writableCalendarCatalog: {
+    var calendars = []
+    for (var i = 0; i < root.calendarCatalog.length; i++) {
+      if (!root.calendarCatalog[i].read_only) calendars.push(root.calendarCatalog[i])
+    }
+    return calendars
+  }
   readonly property var calendarSlugs: {
     var slugs = []
     for (var i = 0; i < calendarEvents.length; i++) {
@@ -172,8 +182,8 @@ Panel {
   //      sweep re-evaluate without polling timers.
   property date eventClock: new Date()
   property bool eventNotificationsEnabled: String(setting("eventNotifications", "true")).toLowerCase() !== "false"
-  readonly property string calendarColorMode: String(setting("calendarColorMode", "google")).toLowerCase() === "theme"
-    ? "theme" : "google"
+  readonly property string calendarColorMode: String(setting("calendarColorMode", "calendar")).toLowerCase() === "theme"
+    ? "theme" : "calendar"
   readonly property int settingsCardWidth: Style.space(300)
   readonly property int settingsCardGap: Style.gapsOut
   readonly property bool settingsCardOnRight: panel.cardOrigin.x + panel.contentWidth
@@ -242,9 +252,30 @@ Panel {
   }
 
   function setCalendarColorMode(mode) {
-    var next = String(mode || "") === "theme" ? "theme" : "google"
+    var next = String(mode || "") === "theme" ? "theme" : "calendar"
     if (next === root.calendarColorMode) return
     root.persistSettings({ calendarColorMode: next })
+  }
+
+  function calendarMeta(slug) {
+    var value = String(slug || "")
+    for (var i = 0; i < root.calendarCatalog.length; i++) {
+      if (String(root.calendarCatalog[i].slug || "") === value) return root.calendarCatalog[i]
+    }
+    return null
+  }
+
+  function calendarChoiceLabel(entry) {
+    if (!entry) return ""
+    return String(entry.name || entry.slug || "")
+  }
+
+  function fallbackCalendarSlug() {
+    var preferred = String(root.defaultCalendarSlug || "")
+    var entry = root.calendarMeta(preferred)
+    if (entry && !entry.read_only) return preferred
+    return root.writableCalendarCatalog.length > 0
+      ? String(root.writableCalendarCatalog[0].slug || "") : ""
   }
 
   // Asks the runtime probe whether the Caldir binaries are installed. The
@@ -259,9 +290,17 @@ Panel {
   // Opens a floating terminal running the selected interactive setup flow.
   function runCalendarSetup(mode) {
     if (!root.bar || typeof root.bar.run !== "function") return
-    var hosted = String(mode || "") === "hosted"
+    var selected = String(mode || "")
     var launcher = "omarchy-launch-floating-terminal-with-presentation"
-    root.bar.run(launcher + " " + Util.shellQuote(root.setupPath()) + (hosted ? " --hosted" : ""))
+    var command = Util.shellQuote(root.setupPath())
+    if (selected === "hosted") {
+      command += " --provider google --hosted"
+    } else if (selected === "icloud") {
+      command += " --provider icloud"
+    } else {
+      command += " --provider google"
+    }
+    root.bar.run(launcher + " " + command)
     root.close()
   }
 
@@ -408,6 +447,7 @@ Panel {
 
   function startCreatingEvent() {
     selectedAgendaEvent = null
+    editingCalendarSlug = fallbackCalendarSlug()
     eventMutationScope = "series"
     eventRepeatMode = "none"
     originalEventRecurrenceRule = ""
@@ -436,6 +476,7 @@ Panel {
       return
     }
     selectedAgendaEvent = event
+    editingCalendarSlug = String(event.calendar || fallbackCalendarSlug())
     eventMutationScope = event.recurring ? "instance" : "series"
     originalEventRecurrenceRule = String(event.recurrence_rule || "")
     eventRepeatMode = event.recurring ? recurrenceModeFromRule(originalEventRecurrenceRule) : "none"
@@ -458,6 +499,7 @@ Panel {
   function cancelEditingEvent() {
     if (calendarCreating || calendarMutating) return
     editingEvent = false
+    editingCalendarSlug = ""
     selectedAgendaEvent = null
     calendarDeleteArmed = false
     calendarDeleteConfirmation.stop()
@@ -490,6 +532,10 @@ Panel {
       eventTimeField.forceActiveFocus()
       return
     }
+    if (root.editingCalendarSlug === "") {
+      calendarSyncMessage = "Choose a writable calendar"
+      return
+    }
     if (root.eventAllDayEditing) time = ""
     if (selectedAgendaEvent) {
       calendarMutating = true
@@ -505,7 +551,7 @@ Panel {
         String(selectedAgendaEvent.start || ""),
         String(selectedAgendaEvent.end || ""),
         root.eventAllDayEditing ? "true" : "false",
-        title, time, recurrenceRuleForMutation(repeatCount), description
+        title, time, recurrenceRuleForMutation(repeatCount), root.editingCalendarSlug, description
       ]
       calendarMutationProcess.running = true
       return
@@ -516,7 +562,7 @@ Panel {
       root.helperPath("calendar-create"),
       title, agendaDateKey, time, eventRepeatMode,
       eventRepeatMode === "none" ? "" : repeatCount,
-      description
+      root.editingCalendarSlug, description
     ]
     calendarCreateProcess.running = true
   }
@@ -617,7 +663,7 @@ Panel {
   function eventColors(dateKey) {
     var entry = calendarEventsByDate[dateKey]
     if (!entry) return []
-    if (root.calendarColorMode === "google") return entry.colors
+    if (root.calendarColorMode === "calendar") return entry.colors
 
     var colors = []
     for (var i = 0; i < entry.events.length; i++) {
@@ -784,12 +830,12 @@ Panel {
   }
 
   function lastPullLabel() {
-    if (lastCalendarPull === "") return "Not pulled from Google yet"
+    if (lastCalendarPull === "") return "Not pulled from connected calendars yet"
     var date = new Date(lastCalendarPull)
-    return isNaN(date.getTime()) ? "Pulled from Google" : "Last pull: " + Qt.formatDateTime(date, "d MMM, HH:mm")
+    return isNaN(date.getTime()) ? "Pulled from connected calendars" : "Last pull: " + Qt.formatDateTime(date, "d MMM, HH:mm")
   }
 
-  function pullFromGoogle() {
+  function pullFromCalendars() {
     if (calendarPullProcess.running || calendarAutoPrefetchProcess.running
         || calendarScheduledRefreshProcess.running) return
     if (root.calendarRuntimeMissing) {
@@ -798,7 +844,7 @@ Panel {
       return
     }
     calendarPulling = true
-    calendarSyncMessage = "Pulling latest changes from Google…"
+    calendarSyncMessage = "Pulling latest changes from connected calendars…"
     calendarPullOutput = ""
     calendarPullProcess.command = [
       root.helperPath("calendar-pull"), "--pending", prefetchStartDate(), prefetchEndDate()
@@ -806,7 +852,7 @@ Panel {
     calendarPullProcess.running = true
   }
 
-  function pushToGoogle() {
+  function pushToCalendars() {
     if (calendarPushProcess.running) return
     if (root.calendarRuntimeMissing) {
       root.probeCalendarRuntime()
@@ -815,7 +861,7 @@ Panel {
     }
     if (!calendarPushArmed) {
       calendarPushArmed = true
-      calendarSyncMessage = "Push pending local changes to Google? Click upload again to confirm"
+      calendarSyncMessage = "Push pending local changes to connected calendars? Click upload again to confirm"
       calendarPushConfirmation.restart()
       return
     }
@@ -823,7 +869,7 @@ Panel {
     calendarPushArmed = false
     calendarPushing = true
     calendarPushOutput = ""
-    calendarSyncMessage = "Pushing local changes to Google…"
+    calendarSyncMessage = "Pushing local changes to connected calendars…"
     calendarPushProcess.command = [root.helperPath("calendar-push"), "--confirm"]
     calendarPushProcess.running = true
   }
@@ -1027,6 +1073,8 @@ Panel {
       onStreamFinished: {
         var parsed = CalendarModel.parseBridgeOutput(text)
         root.calendarEvents = parsed.events
+        root.calendarCatalog = parsed.calendars
+        root.defaultCalendarSlug = parsed.defaultCalendar
         root.calendarEventsByDate = CalendarModel.indexEventsByDate(parsed.events)
         root.calendarRangeStart = parsed.rangeStart
         root.calendarRangeEnd = parsed.rangeEnd
@@ -1064,7 +1112,7 @@ Panel {
         root.calendarRuntimeMissing = true
         root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
       } else {
-        root.calendarSyncMessage = root.calendarPullOutput || "Google pull failed"
+        root.calendarSyncMessage = root.calendarPullOutput || "Calendar pull failed"
       }
     }
   }
@@ -1127,8 +1175,8 @@ Panel {
       if (exitCode === 0) {
         root.editingEvent = false
         root.calendarSyncMessage = root.eventRepeatMode === "none"
-          ? "Saved event locally — Push to Google when you are ready"
-          : "Saved recurring event locally — Push to Google when you are ready"
+          ? "Saved event locally — Push when you are ready"
+          : "Saved recurring event locally — Push when you are ready"
         calendarReloadAfterPull.restart()
       } else {
         root.calendarSyncMessage = root.calendarCreateOutput || "Could not save the local event"
@@ -1155,8 +1203,8 @@ Panel {
         root.selectedAgendaEvent = null
         root.calendarDeleteArmed = false
         root.calendarSyncMessage = action === "delete"
-          ? "Deleted " + target + " locally — Push to Google when you are ready"
-          : "Updated " + target + " locally — Push to Google when you are ready"
+          ? "Deleted " + target + " locally — Push when you are ready"
+          : "Updated " + target + " locally — Push when you are ready"
         calendarReloadAfterPull.restart()
       } else {
         root.calendarSyncMessage = root.calendarMutationOutput || "Could not change the local event"
@@ -1177,7 +1225,7 @@ Panel {
     onExited: function(exitCode) {
       root.calendarPushing = false
       if (exitCode === 0) {
-        root.calendarSyncMessage = "Pushed local changes to Google"
+        root.calendarSyncMessage = "Pushed local changes to connected calendars"
         root.calendarStatusEntries = []
         root.calendarStatusOutput = ""
         calendarReloadAfterPull.restart()
@@ -1185,7 +1233,7 @@ Panel {
         root.calendarRuntimeMissing = true
         root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
       } else {
-        root.calendarSyncMessage = root.calendarPushOutput || "Could not push local changes to Google"
+        root.calendarSyncMessage = root.calendarPushOutput || "Could not push local changes to connected calendars"
       }
     }
   }
@@ -1197,7 +1245,7 @@ Panel {
     onTriggered: {
       root.calendarPushArmed = false
       if (!root.calendarPushing)
-        root.calendarSyncMessage = "Google push cancelled"
+        root.calendarSyncMessage = "Calendar push cancelled"
     }
   }
 
@@ -1969,24 +2017,24 @@ Panel {
 
                 PanelActionButton {
                   iconText: "↓"
-                  tooltipText: "Pull latest from Google"
+                  tooltipText: "Pull latest from connected calendars"
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarPulling && !root.calendarAutoPrefetching
                     && !root.calendarStatusLoading && !root.calendarScheduledRefreshing
-                  onClicked: root.pullFromGoogle()
+                  onClicked: root.pullFromCalendars()
                 }
 
                 PanelActionButton {
                   iconText: "↑"
                   tooltipText: root.calendarPushArmed
-                    ? "Click again to push local changes to Google"
-                    : "Push local changes to Google (confirmation required)"
+                    ? "Click again to push local changes to connected calendars"
+                    : "Push local changes to connected calendars (confirmation required)"
                   foreground: root.calendarPushArmed ? Color.accent : root.contentForeground
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarPushing && !root.calendarPulling
                     && !root.calendarAutoPrefetching && !root.calendarScheduledRefreshing
-                  onClicked: root.pushToGoogle()
+                  onClicked: root.pushToCalendars()
                 }
 
               }
@@ -2021,7 +2069,7 @@ Panel {
                 Text {
                   width: parent.width
                   wrapMode: Text.Wrap
-                  text: "Google sync needs setup. Choose how Google OAuth should work:"
+                  text: "Connect a calendar provider:"
                   color: root.barForeground
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
@@ -2031,7 +2079,7 @@ Panel {
                   spacing: Style.space(6)
 
                   Button {
-                    text: "Direct setup"
+                    text: "Google Direct"
                     tooltipText: "Use your own Google Cloud OAuth client"
                     fontSize: Style.font.caption
                     horizontalPadding: Style.space(6)
@@ -2043,7 +2091,7 @@ Panel {
                   }
 
                   Button {
-                    text: "Hosted setup"
+                    text: "Google Hosted"
                     tooltipText: "Use caldir.org's hosted OAuth relay"
                     fontSize: Style.font.caption
                     horizontalPadding: Style.space(6)
@@ -2053,12 +2101,24 @@ Panel {
                     bordered: true
                     onClicked: root.runCalendarSetup("hosted")
                   }
+
+                  Button {
+                    text: "iCloud"
+                    tooltipText: "Use your Apple ID and an app-specific password"
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(2)
+                    foreground: root.barForeground
+                    fontFamily: root.contentFontFamily
+                    bordered: true
+                    onClicked: root.runCalendarSetup("icloud")
+                  }
                 }
 
                 Text {
                   width: parent.width
                   wrapMode: Text.Wrap
-                  text: "Direct uses your own Google Cloud client and keeps token refreshes between this machine and Google. Hosted needs no client, but caldir.org relays sign-in and future token refreshes."
+                  text: "Google Direct uses your own Google Cloud client. Google Hosted uses caldir.org for sign-in and token refreshes. iCloud uses your Apple ID with an app-specific password."
                   color: Qt.darker(root.barForeground, 1.5)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
@@ -2248,6 +2308,58 @@ Panel {
                 Keys.onReturnPressed: root.saveLocalEvent()
                 Keys.onEnterPressed: root.saveLocalEvent()
                 Keys.onEscapePressed: root.cancelEditingEvent()
+              }
+            }
+
+            Column {
+              visible: root.editingEvent && root.writableCalendarCatalog.length > 0
+              width: parent.width
+              spacing: Style.space(4)
+
+              Text {
+                text: "CALENDAR"
+                color: Qt.darker(root.contentForeground, 1.6)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1
+              }
+
+              Flow {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: root.writableCalendarCatalog
+
+                  Button {
+                    required property var modelData
+                    text: root.calendarChoiceLabel(modelData)
+                    tooltipText: String(modelData.slug || "")
+                      + (String(modelData.provider || "") !== ""
+                        ? " · " + String(modelData.provider || "").toUpperCase() : "")
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(2)
+                    foreground: root.editingCalendarSlug === String(modelData.slug || "")
+                      ? Color.accent : root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    bordered: true
+                    onClicked: root.editingCalendarSlug = String(modelData.slug || "")
+                  }
+                }
+              }
+
+              Text {
+                visible: !!root.selectedAgendaEvent
+                  && root.selectedAgendaEvent.recurring
+                  && root.eventMutationScope === "instance"
+                  && root.editingCalendarSlug !== String(root.selectedAgendaEvent.calendar || "")
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: "Moving one event to another calendar detaches it from the recurring series."
+                color: Qt.darker(root.contentForeground, 1.65)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
               }
             }
 
@@ -2685,7 +2797,72 @@ Button {
 
           Text {
             width: parent.width
-            text: "GOOGLE OAUTH"
+            text: "ADD CALENDAR"
+            color: Qt.darker(root.contentForeground, 1.5)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.letterSpacing: 1
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Add another calendar provider at any time. Google offers direct or hosted OAuth; iCloud uses your Apple ID and an app-specific password."
+            color: Qt.darker(root.contentForeground, 1.65)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            spacing: Style.spacing.md
+
+            Button {
+              text: "GOOGLE DIRECT"
+              tooltipText: "Authenticate directly with your Google OAuth client"
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(6)
+              verticalPadding: Style.space(2)
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              bordered: true
+              onClicked: root.runCalendarSetup("direct")
+            }
+
+            Button {
+              text: "GOOGLE HOSTED"
+              tooltipText: "Authenticate through caldir.org"
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(6)
+              verticalPadding: Style.space(2)
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              bordered: true
+              onClicked: root.runCalendarSetup("hosted")
+            }
+
+            Button {
+              text: "ICLOUD"
+              tooltipText: "Connect iCloud with your Apple ID and an app-specific password"
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(6)
+              verticalPadding: Style.space(2)
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              bordered: true
+              onClicked: root.runCalendarSetup("icloud")
+            }
+          }
+
+          Rectangle {
+            width: parent.width
+            height: Style.spacing.hairline
+            color: root.contentForeground
+            opacity: 0.12
+          }
+
+          Text {
+            width: parent.width
+            text: "GOOGLE OAUTH MODE"
             color: Qt.darker(root.contentForeground, 1.5)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2696,7 +2873,7 @@ Button {
             width: parent.width
             wrapMode: Text.Wrap
             text: root.authStatusLoading
-              ? "Checking authentication…"
+              ? "Checking Google authentication…"
               : root.authStatusError !== "" ? root.authStatusError
               : root.authMode === "none" ? "Not connected"
               : (root.authMode === "hosted" ? "Hosted" : "Direct")
@@ -2741,7 +2918,7 @@ Button {
           Text {
             width: parent.width
             wrapMode: Text.Wrap
-            text: "Switching signs out the current session and opens the interactive setup flow. Stored direct credentials are preserved."
+            text: "Switching signs out the current Google session and opens the interactive setup flow. Stored direct credentials are preserved."
             color: Qt.darker(root.contentForeground, 1.65)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2767,10 +2944,10 @@ Button {
             spacing: Style.spacing.md
 
             SettingsChoiceButton {
-              optionValue: "google"
+              optionValue: "calendar"
               currentValue: root.calendarColorMode
-              text: "GOOGLE"
-              tooltipText: "Use each calendar's color from Google Calendar"
+              text: "CALENDAR"
+              tooltipText: "Use each calendar's stored provider color"
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2841,7 +3018,7 @@ Button {
           Text {
             width: parent.width
             wrapMode: Text.Wrap
-            text: "Remove this widget, restore the built-in clock in the bar center, and choose whether to delete Google credentials and calendar data."
+            text: "Remove this widget, restore the built-in clock in the bar center, and choose whether to delete Google or iCloud credentials and calendar data."
             color: Qt.darker(root.contentForeground, 1.65)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption

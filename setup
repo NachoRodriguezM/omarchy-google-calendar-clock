@@ -10,23 +10,24 @@ DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"
 BIN_DIR="${INSTALL_ROOT}/bin"
-GOOGLE_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/google"
 CALDIR_WRAPPER="${SCRIPT_DIR}/scripts/calendar-caldir"
 SHELL_CONFIG="${CONFIG_HOME}/omarchy/shell.json"
 BINARIES_ONLY=false
 HOSTED_OAUTH=false
+CALENDAR_PROVIDER="google"
 
 usage() {
   cat <<'EOF'
-Usage: ./setup [--binaries-only] [--hosted]
+Usage: ./setup [--binaries-only] [--provider google|icloud] [--hosted]
 
 Downloads verified Omarchy Google Calendar and Clock Caldir binaries and,
-unless --binaries-only is used, guides you through Google OAuth setup.
+unless --binaries-only is used, guides you through calendar-provider setup.
 
 Options:
   --binaries-only   Install the Caldir binaries and stop; do not connect
+  --provider        Choose which provider to connect (default: google)
   --hosted          Use caldir.org's hosted Google OAuth relay instead of
-                    your own Google Cloud OAuth client
+                    your own Google Cloud OAuth client (Google only)
 
 Auth modes:
   default (direct)  You create a Desktop OAuth client in your own Google
@@ -37,18 +38,41 @@ Auth modes:
                     client. No Google Cloud project needed, but every
                     token refresh depends on caldir.org being reachable,
                     and your OAuth tokens pass through their servers.
+  iCloud            Uses your Apple ID together with an app-specific
+                    password. No OAuth mode choice is involved.
 EOF
 }
 
 while (( $# > 0 )); do
   case "$1" in
     --binaries-only) BINARIES_ONLY=true ;;
+    --provider)
+      shift
+      [[ $# -gt 0 ]] || { usage >&2; exit 64; }
+      CALENDAR_PROVIDER="$1"
+      ;;
+    --provider=*)
+      CALENDAR_PROVIDER="${1#*=}"
+      ;;
     --hosted) HOSTED_OAUTH=true ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 64 ;;
   esac
   shift
 done
+
+case "$CALENDAR_PROVIDER" in
+  google) PROVIDER_LABEL="Google" ;;
+  icloud) PROVIDER_LABEL="iCloud" ;;
+  *) usage >&2; exit 64 ;;
+esac
+
+if $HOSTED_OAUTH && [[ "$CALENDAR_PROVIDER" != "google" ]]; then
+  echo "--hosted is only available with --provider google." >&2
+  exit 64
+fi
+
+PROVIDER_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/${CALENDAR_PROVIDER}"
 
 for dependency in curl jq tar sha256sum omarchy; do
   command -v "$dependency" >/dev/null || {
@@ -107,18 +131,18 @@ NEW_BIN_DIR="${INSTALL_ROOT}/.bin.new.$$"
 BACKUP_BIN_DIR="${INSTALL_ROOT}/.bin.backup.$$"
 BIN_SWAPPED=false
 OLD_BIN_MOVED=false
-GOOGLE_CONFIG_EXISTED=false
+PROVIDER_CONFIG_EXISTED=false
 OAUTH_COMPLETE=false
 
-[[ -e "$GOOGLE_CONFIG_DIR" ]] && GOOGLE_CONFIG_EXISTED=true
+[[ -e "$PROVIDER_CONFIG_DIR" ]] && PROVIDER_CONFIG_EXISTED=true
 
 rollback() {
   status=$?
   if (( status != 0 )) && ! $OAUTH_COMPLETE; then
     if $BIN_SWAPPED; then rm -rf -- "$BIN_DIR"; fi
     if $OLD_BIN_MOVED && [[ -e "$BACKUP_BIN_DIR" ]]; then mv -- "$BACKUP_BIN_DIR" "$BIN_DIR"; fi
-    if ! $GOOGLE_CONFIG_EXISTED && [[ -e "$GOOGLE_CONFIG_DIR" ]]; then
-      rm -rf -- "$GOOGLE_CONFIG_DIR"
+    if ! $PROVIDER_CONFIG_EXISTED && [[ -e "$PROVIDER_CONFIG_DIR" ]]; then
+      rm -rf -- "$PROVIDER_CONFIG_DIR"
     fi
   fi
   rm -rf -- "$NEW_BIN_DIR" "$WORK_DIR"
@@ -156,9 +180,10 @@ printf '%s  %s\n' "$EXPECTED_SHA256" "$ASSET" | (
   sha256sum --check --status -
 )
 
-expected_entries=$'BUILD-INFO\nCALDIR-LICENSE\ncaldir\ncaldir-provider-google'
+expected_entries_legacy=$'BUILD-INFO\nCALDIR-LICENSE\ncaldir\ncaldir-provider-google'
+expected_entries_current=$'BUILD-INFO\nCALDIR-LICENSE\ncaldir\ncaldir-provider-google\ncaldir-provider-icloud'
 archive_entries=$(tar -tzf "${WORK_DIR}/${ASSET}" | sed 's#^\./##' | LC_ALL=C sort)
-[[ "$archive_entries" == "$expected_entries" ]] || {
+[[ "$archive_entries" == "$expected_entries_legacy" || "$archive_entries" == "$expected_entries_current" ]] || {
   echo "The downloaded archive contains unexpected files; refusing to install it." >&2
   exit 1
 }
@@ -168,14 +193,25 @@ tar -xzf "${WORK_DIR}/${ASSET}" -C "$WORK_DIR"
   echo "The downloaded Caldir executables are invalid." >&2
   exit 1
 }
+bundled_icloud_provider=false
+[[ -x "${WORK_DIR}/caldir-provider-icloud" ]] && bundled_icloud_provider=true
 [[ "$("${WORK_DIR}/caldir" --version)" == "caldir-cli ${CALDIR_VERSION}" ]] || {
   echo "The downloaded Caldir version does not match the plugin." >&2
   exit 1
 }
 
+if [[ "$CALENDAR_PROVIDER" == "icloud" ]] && ! $bundled_icloud_provider && ! command -v caldir-provider-icloud >/dev/null; then
+  echo "This plugin release does not yet bundle caldir-provider-icloud." >&2
+  echo "Install caldir-provider-icloud on PATH or publish a release built from this branch." >&2
+  exit 75
+fi
+
 mkdir -p "$INSTALL_ROOT" "$NEW_BIN_DIR"
 install -m 0755 "${WORK_DIR}/caldir" "${NEW_BIN_DIR}/caldir"
 install -m 0755 "${WORK_DIR}/caldir-provider-google" "${NEW_BIN_DIR}/caldir-provider-google"
+if $bundled_icloud_provider; then
+  install -m 0755 "${WORK_DIR}/caldir-provider-icloud" "${NEW_BIN_DIR}/caldir-provider-icloud"
+fi
 install -m 0644 "${WORK_DIR}/CALDIR-LICENSE" "${NEW_BIN_DIR}/CALDIR-LICENSE"
 install -m 0644 "${WORK_DIR}/BUILD-INFO" "${NEW_BIN_DIR}/BUILD-INFO"
 
@@ -193,16 +229,16 @@ if $BINARIES_ONLY; then
   exit 0
 fi
 
-session_dir="${GOOGLE_CONFIG_DIR}/session"
+session_dir="${PROVIDER_CONFIG_DIR}/session"
 has_session=false
 if [[ -d "$session_dir" ]] && find "$session_dir" -maxdepth 1 -type f -name '*.toml' -print -quit | grep -q .; then
   has_session=true
 fi
 
 if $has_session; then
-  echo "An existing Google OAuth session was found; it will be reused."
+  echo "An existing ${PROVIDER_LABEL} session was found; it will be reused."
 else
-  if $HOSTED_OAUTH; then
+  if [[ "$CALENDAR_PROVIDER" == "google" ]] && $HOSTED_OAUTH; then
     cat <<'EOF'
 
 You chose hosted Google OAuth: caldir.org relays the sign-in with its own
@@ -216,7 +252,7 @@ If you prefer direct authentication with Google, rerun setup without
 
 EOF
     "$CALDIR_WRAPPER" connect google
-  else
+  elif [[ "$CALENDAR_PROVIDER" == "google" ]]; then
     cat <<'EOF'
 
 You chose direct Google OAuth: authentication happens directly between this
@@ -233,32 +269,41 @@ straight to Google. For an easier setup that skips the Google Cloud project
 
 EOF
     "$CALDIR_WRAPPER" connect google --hosted=false
+  else
+    cat <<'EOF'
+
+You chose iCloud Calendar. Caldir will ask for your Apple ID and an
+app-specific password from account.apple.com, because iCloud does not allow
+third-party CalDAV apps to use your regular Apple ID password.
+
+EOF
+    "$CALDIR_WRAPPER" connect icloud
   fi
 fi
 
 config_json=$("$CALDIR_WRAPPER" config --json)
 calendar_dir=$(jq -er '.config.calendar_dir' <<<"$config_json")
 [[ -d "$calendar_dir" ]] || {
-  echo "OAuth completed, but Caldir did not create its calendar directory." >&2
+  echo "Setup completed, but Caldir did not create its calendar directory." >&2
   exit 75
 }
-google_calendar_found=false
+provider_calendar_found=false
 shopt -s nullglob
 for calendar_config in "$calendar_dir"/*/.caldir/config.toml; do
-  if grep -Eq '^provider[[:space:]]*=[[:space:]]*"google"' "$calendar_config"; then
-    google_calendar_found=true
+  if grep -Eq "^provider[[:space:]]*=[[:space:]]*\"${CALENDAR_PROVIDER}\"" "$calendar_config"; then
+    provider_calendar_found=true
     break
   fi
 done
-if ! $google_calendar_found; then
-  echo "OAuth completed, but no Google calendar was selected." >&2
+if ! $provider_calendar_found; then
+  echo "${PROVIDER_LABEL} setup completed, but no ${PROVIDER_LABEL} calendar was selected." >&2
   exit 75
 fi
 OAUTH_COMPLETE=true
 
-echo "Validating Google access with an initial pull..."
+echo "Validating ${PROVIDER_LABEL} access with an initial pull..."
 if ! "$CALDIR_WRAPPER" pull >/dev/null; then
-  echo "Google authorization was saved, but the first pull failed." >&2
+  echo "${PROVIDER_LABEL} connection was saved, but the first pull failed." >&2
   echo "Your setup was preserved; rerun ./setup to retry validation." >&2
   exit 75
 fi

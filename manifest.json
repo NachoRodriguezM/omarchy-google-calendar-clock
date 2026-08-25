@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "omarchy-google-calendar-clock",
   "name": "Omarchy Google Calendar and Clock",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "author": "Community contributors",
-  "description": "An Omarchy clock with a local-first calendar and Google sync",
+  "description": "An Omarchy clock with a local-first calendar and Google or iCloud sync",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Omarchy Google Calendar and Clock",
-    "description": "Clock and local-first calendar with optional Google sync",
+    "description": "Clock and local-first calendar with optional Google or iCloud sync",
     "category": "Time",
     "allowMultiple": false,
     "defaultSection": "center"

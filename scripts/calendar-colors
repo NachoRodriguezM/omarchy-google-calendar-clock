@@ -11,8 +11,10 @@ umask 077
 # offline or unauthenticated runs keep the last-known colors and exit 0.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CALDIR_BIN="${SCRIPT_DIR}/calendar-caldir"
+CATALOG_BIN="${SCRIPT_DIR}/calendar-catalog"
 
 [[ -x "$CALDIR_BIN" ]] || { echo "Caldir runtime is not installed" >&2; exit 127; }
+[[ -x "$CATALOG_BIN" ]] || exit 0
 command -v curl >/dev/null || { echo "curl is required to refresh calendar colors" >&2; exit 0; }
 command -v jq >/dev/null || { echo "jq is required to refresh calendar colors" >&2; exit 0; }
 
@@ -21,7 +23,7 @@ GOOGLE_CONFIG_DIR="${CONFIG_HOME}/caldir/providers/google"
 SESSION_DIR="${GOOGLE_CONFIG_DIR}/session"
 APP_CONFIG="${GOOGLE_CONFIG_DIR}/app_config.toml"
 
-calendar_dir=$("$CALDIR_BIN" config --json | jq -r '.config.calendar_dir')
+calendar_dir=$("$CATALOG_BIN" | jq -r '.calendar_dir')
 [[ -n "$calendar_dir" && -d "$calendar_dir" ]] || exit 0
 
 # toml_value <file> <key>: print the quoted value of a TOML key.

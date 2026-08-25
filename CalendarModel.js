@@ -7,12 +7,44 @@ function parseBridgeOutput(text) {
     if (result && result.ok === true && Array.isArray(result.events)) {
       var start = /^\d{4}-\d{2}-\d{2}$/.test(String(result.range_start || "")) ? result.range_start : ""
       var end = /^\d{4}-\d{2}-\d{2}$/.test(String(result.range_end || "")) ? result.range_end : ""
-      return { events: result.events, rangeStart: start, rangeEnd: end, error: "" }
+      return {
+        events: result.events,
+        calendars: normalizeCalendars(result.calendars),
+        defaultCalendar: normalizeSlug(result.default_calendar),
+        rangeStart: start,
+        rangeEnd: end,
+        error: ""
+      }
     }
-    return { events: [], rangeStart: "", rangeEnd: "", error: String((result && result.error) || "Calendar data is unavailable") }
+    return { events: [], calendars: [], defaultCalendar: "", rangeStart: "", rangeEnd: "", error: String((result && result.error) || "Calendar data is unavailable") }
   } catch (error) {
-    return { events: [], rangeStart: "", rangeEnd: "", error: "Calendar data is unavailable" }
+    return { events: [], calendars: [], defaultCalendar: "", rangeStart: "", rangeEnd: "", error: "Calendar data is unavailable" }
   }
+}
+
+function normalizeSlug(value) {
+  var slug = String(value || "")
+  return /^[A-Za-z0-9._-]+$/.test(slug) ? slug : ""
+}
+
+function normalizeCalendars(value) {
+  if (!Array.isArray(value)) return []
+  var calendars = []
+  for (var i = 0; i < value.length; i++) {
+    var entry = value[i] || {}
+    var slug = normalizeSlug(entry.slug)
+    if (slug === "") continue
+    var color = String(entry.color || "")
+    calendars.push({
+      slug: slug,
+      name: String(entry.name || slug),
+      provider: String(entry.provider || ""),
+      color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
+      read_only: entry.read_only === true,
+      is_default: entry.is_default === true
+    })
+  }
+  return calendars
 }
 
 function localDateKey(value) {

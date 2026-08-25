@@ -6,9 +6,14 @@ set -euo pipefail
 # only ISO calendar dates and never invokes Caldir sync/push/create commands.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CALDIR_BIN="${SCRIPT_DIR}/calendar-caldir"
+CATALOG_BIN="${SCRIPT_DIR}/calendar-catalog"
 
 if [[ ! -x "$CALDIR_BIN" ]]; then
   printf '{"ok":false,"error":"Caldir is not installed"}\n'
+  exit 0
+fi
+if [[ ! -x "$CATALOG_BIN" ]]; then
+  printf '{"ok":false,"error":"Calendar catalog is not installed"}\n'
   exit 0
 fi
 
@@ -26,20 +31,14 @@ if ! output=$("$CALDIR_BIN" --json events --from "$from_date" --to "$to_date" 2>
   exit 0
 fi
 
-# Caldir stores a color alongside each local calendar. Build a small safe map
-# keyed by its directory slug, then attach it to the JSON UI contract.
-calendar_dir=$("$CALDIR_BIN" config --json | jq -r '.config.calendar_dir')
-calendar_meta=$(
-  shopt -s nullglob
-  for config in "$calendar_dir"/*/.caldir/config.toml; do
-    slug=$(basename "$(dirname "$(dirname "$config")")")
-    color=$(awk -F ' = ' '$1 == "color" { gsub(/"/, "", $2); print $2; exit }' "$config")
-    read_only=$(awk -F ' = ' '$1 == "read_only" { gsub(/[[:space:]]/, "", $2); print $2; exit }' "$config")
-    [[ "$slug" =~ ^[A-Za-z0-9._-]+$ && "$color" =~ ^#[0-9A-Fa-f]{6}$ ]] || continue
-    [[ "$read_only" == "true" ]] || read_only=false
-    printf '%s\t%s\t%s\n' "$slug" "$color" "$read_only"
-  done | jq -Rn '[inputs | split("\t") | {key: .[0], value: {color: .[1], read_only: (.[2] == "true")}}] | from_entries'
-)
+catalog_json=$("$CATALOG_BIN") || {
+  jq -Rn --arg error "Could not read the local calendar catalog" '{ok:false,error:$error}'
+  exit 0
+}
+calendar_dir=$(jq -r '.calendar_dir' <<<"$catalog_json")
+calendar_meta=$(jq -c '[.calendars[] | {key: .slug, value: {color: (.color // ""), read_only: (.read_only == true)}}] | from_entries' <<<"$catalog_json")
+calendar_catalog=$(jq -c '.calendars' <<<"$catalog_json")
+default_calendar=$(jq -r '.default_calendar // ""' <<<"$catalog_json")
 
 # Expanded Caldir events deliberately omit the master's RRULE. Attach that
 # compact rule by (calendar, UID) so the editor can show and change a series'
@@ -106,6 +105,7 @@ event_type_meta=$(
 
 jq -c --argjson calendar_meta "$calendar_meta" --argjson recurrence_meta "$recurrence_meta" \
   --argjson event_type_meta "$event_type_meta" --argjson conference_meta "$conference_meta" \
+  --argjson calendar_catalog "$calendar_catalog" --arg default_calendar "$default_calendar" \
   '{ok:true,events:[.[] | . + {
     calendar_color: ($calendar_meta[.calendar].color // null),
     calendar_read_only: (if $calendar_meta[.calendar].read_only == null then true else $calendar_meta[.calendar].read_only end),
@@ -115,4 +115,4 @@ jq -c --argjson calendar_meta "$calendar_meta" --argjson recurrence_meta "$recur
     event_title_only: (($event_type_meta[(.calendar + "\u001f" + .uid)] // "default") == "birthday"),
     event_read_only: ((($event_type_meta[(.calendar + "\u001f" + .uid)] // "default") != "default")
       and (($event_type_meta[(.calendar + "\u001f" + .uid)] // "default") != "birthday"))
-  }]}' <<<"$output"
+  }], calendars: $calendar_catalog, default_calendar: $default_calendar}' <<<"$output"
