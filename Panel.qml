@@ -76,6 +76,7 @@ Panel {
   // timezone parsing in the shell.
   property var calendarEvents: []
   property var calendarEventsByDate: ({})
+  property var calendarCatalog: []
   property string calendarError: ""
   property bool calendarLoading: false
   property bool calendarPulling: false
@@ -117,10 +118,12 @@ Panel {
   property int calendarRequestedYear: -1
   property string calendarRangeStart: ""
   property string calendarRangeEnd: ""
+  property string defaultCalendarSlug: ""
   readonly property string lastCalendarPull: String(setting("lastCalendarPull", ""))
   readonly property int calendarPrefetchMonths: Math.max(1, Math.min(24, parseInt(setting("calendarPrefetchMonths", 6), 10) || 6))
   property string agendaDateKey: todayKey
   property bool editingEvent: false
+  property string editingCalendarSlug: ""
   property var selectedAgendaEvent: null
   property string eventMutationScope: "instance"
   property bool calendarMutating: false
@@ -157,6 +160,13 @@ Panel {
   ]
   readonly property var agendaEvents: calendarEventsByDate[agendaDateKey]
     ? calendarEventsByDate[agendaDateKey].events : []
+  readonly property var writableCalendarCatalog: {
+    var calendars = []
+    for (var i = 0; i < root.calendarCatalog.length; i++) {
+      if (!root.calendarCatalog[i].read_only) calendars.push(root.calendarCatalog[i])
+    }
+    return calendars
+  }
   readonly property var calendarSlugs: {
     var slugs = []
     for (var i = 0; i < calendarEvents.length; i++) {
@@ -172,8 +182,8 @@ Panel {
   //      sweep re-evaluate without polling timers.
   property date eventClock: new Date()
   property bool eventNotificationsEnabled: String(setting("eventNotifications", "true")).toLowerCase() !== "false"
-  readonly property string calendarColorMode: String(setting("calendarColorMode", "google")).toLowerCase() === "theme"
-    ? "theme" : "google"
+  readonly property string calendarColorMode: String(setting("calendarColorMode", "calendar")).toLowerCase() === "theme"
+    ? "theme" : "calendar"
   readonly property int settingsCardWidth: Style.space(300)
   readonly property int settingsCardGap: Style.gapsOut
   readonly property bool settingsCardOnRight: panel.cardOrigin.x + panel.contentWidth
@@ -242,9 +252,30 @@ Panel {
   }
 
   function setCalendarColorMode(mode) {
-    var next = String(mode || "") === "theme" ? "theme" : "google"
+    var next = String(mode || "") === "theme" ? "theme" : "calendar"
     if (next === root.calendarColorMode) return
     root.persistSettings({ calendarColorMode: next })
+  }
+
+  function calendarMeta(slug) {
+    var value = String(slug || "")
+    for (var i = 0; i < root.calendarCatalog.length; i++) {
+      if (String(root.calendarCatalog[i].slug || "") === value) return root.calendarCatalog[i]
+    }
+    return null
+  }
+
+  function calendarChoiceLabel(entry) {
+    if (!entry) return ""
+    return String(entry.name || entry.slug || "")
+  }
+
+  function fallbackCalendarSlug() {
+    var preferred = String(root.defaultCalendarSlug || "")
+    var entry = root.calendarMeta(preferred)
+    if (entry && !entry.read_only) return preferred
+    return root.writableCalendarCatalog.length > 0
+      ? String(root.writableCalendarCatalog[0].slug || "") : ""
   }
 
   // Asks the runtime probe whether the Caldir binaries are installed. The
@@ -416,6 +447,7 @@ Panel {
 
   function startCreatingEvent() {
     selectedAgendaEvent = null
+    editingCalendarSlug = fallbackCalendarSlug()
     eventMutationScope = "series"
     eventRepeatMode = "none"
     originalEventRecurrenceRule = ""
@@ -444,6 +476,7 @@ Panel {
       return
     }
     selectedAgendaEvent = event
+    editingCalendarSlug = String(event.calendar || fallbackCalendarSlug())
     eventMutationScope = event.recurring ? "instance" : "series"
     originalEventRecurrenceRule = String(event.recurrence_rule || "")
     eventRepeatMode = event.recurring ? recurrenceModeFromRule(originalEventRecurrenceRule) : "none"
@@ -466,6 +499,7 @@ Panel {
   function cancelEditingEvent() {
     if (calendarCreating || calendarMutating) return
     editingEvent = false
+    editingCalendarSlug = ""
     selectedAgendaEvent = null
     calendarDeleteArmed = false
     calendarDeleteConfirmation.stop()
@@ -498,6 +532,10 @@ Panel {
       eventTimeField.forceActiveFocus()
       return
     }
+    if (root.editingCalendarSlug === "") {
+      calendarSyncMessage = "Choose a writable calendar"
+      return
+    }
     if (root.eventAllDayEditing) time = ""
     if (selectedAgendaEvent) {
       calendarMutating = true
@@ -513,7 +551,7 @@ Panel {
         String(selectedAgendaEvent.start || ""),
         String(selectedAgendaEvent.end || ""),
         root.eventAllDayEditing ? "true" : "false",
-        title, time, recurrenceRuleForMutation(repeatCount), description
+        title, time, recurrenceRuleForMutation(repeatCount), root.editingCalendarSlug, description
       ]
       calendarMutationProcess.running = true
       return
@@ -524,7 +562,7 @@ Panel {
       root.helperPath("calendar-create"),
       title, agendaDateKey, time, eventRepeatMode,
       eventRepeatMode === "none" ? "" : repeatCount,
-      description
+      root.editingCalendarSlug, description
     ]
     calendarCreateProcess.running = true
   }
@@ -625,7 +663,7 @@ Panel {
   function eventColors(dateKey) {
     var entry = calendarEventsByDate[dateKey]
     if (!entry) return []
-    if (root.calendarColorMode === "google") return entry.colors
+    if (root.calendarColorMode === "calendar") return entry.colors
 
     var colors = []
     for (var i = 0; i < entry.events.length; i++) {
@@ -797,7 +835,7 @@ Panel {
     return isNaN(date.getTime()) ? "Pulled from connected calendars" : "Last pull: " + Qt.formatDateTime(date, "d MMM, HH:mm")
   }
 
-  function pullFromGoogle() {
+  function pullFromCalendars() {
     if (calendarPullProcess.running || calendarAutoPrefetchProcess.running
         || calendarScheduledRefreshProcess.running) return
     if (root.calendarRuntimeMissing) {
@@ -814,7 +852,7 @@ Panel {
     calendarPullProcess.running = true
   }
 
-  function pushToGoogle() {
+  function pushToCalendars() {
     if (calendarPushProcess.running) return
     if (root.calendarRuntimeMissing) {
       root.probeCalendarRuntime()
@@ -1035,6 +1073,8 @@ Panel {
       onStreamFinished: {
         var parsed = CalendarModel.parseBridgeOutput(text)
         root.calendarEvents = parsed.events
+        root.calendarCatalog = parsed.calendars
+        root.defaultCalendarSlug = parsed.defaultCalendar
         root.calendarEventsByDate = CalendarModel.indexEventsByDate(parsed.events)
         root.calendarRangeStart = parsed.rangeStart
         root.calendarRangeEnd = parsed.rangeEnd
@@ -1982,7 +2022,7 @@ Panel {
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarPulling && !root.calendarAutoPrefetching
                     && !root.calendarStatusLoading && !root.calendarScheduledRefreshing
-                  onClicked: root.pullFromGoogle()
+                  onClicked: root.pullFromCalendars()
                 }
 
                 PanelActionButton {
@@ -1994,7 +2034,7 @@ Panel {
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarPushing && !root.calendarPulling
                     && !root.calendarAutoPrefetching && !root.calendarScheduledRefreshing
-                  onClicked: root.pushToGoogle()
+                  onClicked: root.pushToCalendars()
                 }
 
               }
@@ -2268,6 +2308,58 @@ Panel {
                 Keys.onReturnPressed: root.saveLocalEvent()
                 Keys.onEnterPressed: root.saveLocalEvent()
                 Keys.onEscapePressed: root.cancelEditingEvent()
+              }
+            }
+
+            Column {
+              visible: root.editingEvent && root.writableCalendarCatalog.length > 0
+              width: parent.width
+              spacing: Style.space(4)
+
+              Text {
+                text: "CALENDAR"
+                color: Qt.darker(root.contentForeground, 1.6)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1
+              }
+
+              Flow {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Repeater {
+                  model: root.writableCalendarCatalog
+
+                  Button {
+                    required property var modelData
+                    text: root.calendarChoiceLabel(modelData)
+                    tooltipText: String(modelData.slug || "")
+                      + (String(modelData.provider || "") !== ""
+                        ? " · " + String(modelData.provider || "").toUpperCase() : "")
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(2)
+                    foreground: root.editingCalendarSlug === String(modelData.slug || "")
+                      ? Color.accent : root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    bordered: true
+                    onClicked: root.editingCalendarSlug = String(modelData.slug || "")
+                  }
+                }
+              }
+
+              Text {
+                visible: !!root.selectedAgendaEvent
+                  && root.selectedAgendaEvent.recurring
+                  && root.eventMutationScope === "instance"
+                  && root.editingCalendarSlug !== String(root.selectedAgendaEvent.calendar || "")
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: "Moving one event to another calendar detaches it from the recurring series."
+                color: Qt.darker(root.contentForeground, 1.65)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
               }
             }
 
@@ -2852,7 +2944,7 @@ Button {
             spacing: Style.spacing.md
 
             SettingsChoiceButton {
-              optionValue: "google"
+              optionValue: "calendar"
               currentValue: root.calendarColorMode
               text: "CALENDAR"
               tooltipText: "Use each calendar's stored provider color"

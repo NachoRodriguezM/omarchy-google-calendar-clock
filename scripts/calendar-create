@@ -3,13 +3,20 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from calendar_catalog import (
+    CalendarCatalogError,
+    calendar_path,
+    default_writable_calendar_slug,
+    load_calendar_catalog,
+    writable_calendar,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -51,11 +58,17 @@ def atomic_add_metadata(path: Path, rrule: str, description: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 7:
-        fail("Usage: calendar-create TITLE YYYY-MM-DD [HH:MM] none|daily|weekly|monthly|yearly [COUNT] [DESCRIPTION]")
+    if len(sys.argv) not in {7, 8}:
+        fail("Usage: calendar-create TITLE YYYY-MM-DD [HH:MM] none|daily|weekly|monthly|yearly [COUNT] [CALENDAR] [DESCRIPTION]")
 
-    title, date, time_text, repeat, count_text, description = sys.argv[1:]
+    title, date, time_text, repeat, count_text = sys.argv[1:6]
+    if len(sys.argv) == 7:
+        calendar_slug = ""
+        description = sys.argv[6]
+    else:
+        calendar_slug, description = sys.argv[6:8]
     title = title.strip()
+    calendar_slug = calendar_slug.strip()
     description = description.strip()
     if not title or "\r" in title or "\n" in title:
         fail("Event title cannot be empty or contain a newline")
@@ -84,20 +97,19 @@ def main() -> None:
         fail("Calendar tools are not installed", 127)
 
     try:
-        config_result = subprocess.run(
-            [str(caldir), "config", "--json"], check=True, text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        config = json.loads(config_result.stdout)["config"]
-        calendar_root = Path(config["calendar_dir"]).expanduser().resolve()
-        calendar_path = (calendar_root / config["default_calendar"]).resolve()
-    except (OSError, subprocess.CalledProcessError, KeyError, json.JSONDecodeError) as error:
-        fail("Could not read the default Caldir calendar", 1)
+        catalog = load_calendar_catalog()
+        if calendar_slug == "":
+            calendar_slug = default_writable_calendar_slug(catalog)
+        writable_calendar(catalog, calendar_slug)
+        target_calendar_path = calendar_path(catalog, calendar_slug)
+    except CalendarCatalogError as error:
+        fail(str(error), 1)
 
-    files_before = {path.resolve() for path in calendar_path.glob("*.ics")}
+    files_before = {path.resolve() for path in target_calendar_path.glob("*.ics")}
     command = [str(caldir), "new", title, "--start", date + ("T" + time_text if time_text else "")]
     if time_text:
         command += ["--duration", "1h"]
+    command += ["--calendar", calendar_slug]
     environment = os.environ.copy()
     environment["NO_COLOR"] = "1"
     try:
@@ -108,7 +120,7 @@ def main() -> None:
     except subprocess.CalledProcessError as error:
         fail((error.stderr or error.stdout or "Could not create the local event").strip(), 1)
 
-    created_files = [path.resolve() for path in calendar_path.glob("*.ics") if path.resolve() not in files_before]
+    created_files = [path.resolve() for path in target_calendar_path.glob("*.ics") if path.resolve() not in files_before]
     if len(created_files) != 1:
         fail("Could not identify the newly-created local event file", 1)
     created_path = created_files[0]

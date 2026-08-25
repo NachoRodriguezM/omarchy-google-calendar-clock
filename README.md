@@ -89,7 +89,7 @@ You can see the chosen mode and switch from the settings panel too.
 
 Click the clock to open the calendar. The toolbar lets you:
 
-- create an event (`+`);
+- create an event in any writable local calendar (`+`);
 - preview local and remote differences (`✓`);
 - pull from connected calendars (`↓`);
 - push local changes after confirmation (`↑`).
@@ -97,6 +97,10 @@ Click the clock to open the calendar. The toolbar lets you:
 The settings button can add Google or iCloud calendars, switch Google OAuth
 mode, choose provider or theme calendar colors, and open the interactive
 full-uninstall flow.
+
+When editing an event, the form also lets you move it to another writable
+calendar. Moving one occurrence of a recurring series detaches just that
+occurrence into the destination calendar.
 
 The plugin reads its local cache immediately, refreshes in the background at
 shell startup, and pulls every 30 minutes. Automatic refresh never pushes your

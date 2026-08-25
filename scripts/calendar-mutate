@@ -13,8 +13,17 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from calendar_catalog import (
+    CalendarCatalogError,
+    calendar_path as catalog_calendar_path,
+    load_calendar_catalog,
+    resolve_calendar,
+    writable_calendar,
+)
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+PROVIDER_EVENT_ID_PATTERN = re.compile(r"^X-[A-Z0-9-]+-EVENT-ID$")
 
 
 class CalendarError(Exception):
@@ -130,6 +139,24 @@ def calendar_is_read_only(calendar_path: Path) -> bool:
         raise CalendarError("This calendar has no local Caldir configuration")
     match = re.search(r"(?m)^read_only\s*=\s*(true|false)\s*$", config.read_text(encoding="utf-8"))
     return not match or match.group(1) == "true"
+
+
+def without_provider_ids(lines: list[str]) -> list[str]:
+    return [line for line in lines if not PROVIDER_EVENT_ID_PATTERN.fullmatch(property_name(line))]
+
+
+def unique_target_path(target_dir: Path, name: str) -> Path:
+    target = target_dir / name
+    if not target.exists():
+        return target
+    stem = Path(name).stem
+    suffix = Path(name).suffix
+    counter = 2
+    while True:
+        target = target_dir / f"{stem}-moved-{counter}{suffix}"
+        if not target.exists():
+            return target
+        counter += 1
 
 
 def matching_files(calendar_path: Path, uid: str) -> list[tuple[Path, list[str]]]:
@@ -425,6 +452,35 @@ def delete_instance(master: tuple[Path, list[str]], override, parameters: str, r
     atomic_write(master_path, lines)
 
 
+def move_series_files(matches: list[tuple[Path, list[str]]], target_calendar_path: Path, backup_root: Path) -> None:
+    for source_path, lines in matches:
+        backup(source_path, backup_root)
+        target_path = unique_target_path(target_calendar_path, source_path.name)
+        atomic_write(target_path, without_provider_ids(lines))
+        source_path.unlink()
+
+
+def create_detached_occurrence(source_lines: list[str], target_calendar_path: Path,
+                               title: str, description: str, start_iso: str, end_iso: str,
+                               all_day: bool, time_text: str) -> None:
+    lines = without_provider_ids(remove_properties(source_lines.copy(), {
+        "RRULE", "RDATE", "EXRULE", "EXDATE", "RECURRENCE-ID", "DTSTART", "DTEND",
+        "DURATION", "SUMMARY", "DESCRIPTION", "DTSTAMP", "LAST-MODIFIED", "SEQUENCE",
+    }))
+    new_start, new_end = new_clock_fields(start_iso, end_iso, all_day, time_text)
+    set_property(lines, "SUMMARY", escape_text(title))
+    set_optional_text(lines, "DESCRIPTION", description)
+    tzid = "" if all_day else system_tzid()
+    date_params = datetime_parameters(None, all_day, tzid)
+    set_property(lines, "DTSTART", format_event_value(new_start, all_day), date_params)
+    set_property(lines, "DTEND", format_event_value(new_end, all_day), date_params)
+    touch_revision(lines)
+    start_marker = new_start.strftime("%Y-%m-%dT%H%M")
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48] or "event"
+    target_path = unique_target_path(target_calendar_path, f"{start_marker}__{slug}.ics")
+    atomic_write(target_path, lines)
+
+
 def refresh_cache() -> None:
     updater = SCRIPT_DIR / "calendar-cache-update"
     result = subprocess.run([str(updater)], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -506,10 +562,10 @@ def main() -> None:
             repaired = repair_provider_ids()
             print(f"Repaired provider metadata on {repaired} recurring override file(s)")
             return
-        except CalendarError as error:
+        except (CalendarError, CalendarCatalogError) as error:
             fail(str(error))
-    if action == "edit" and len(sys.argv) != 13:
-        fail("Usage: calendar-mutate edit instance|series CALENDAR UID INSTANCE_ID START END true|false TITLE HH:MM RRULE|keep DESCRIPTION", 64)
+    if action == "edit" and len(sys.argv) not in {13, 14}:
+        fail("Usage: calendar-mutate edit instance|series CALENDAR UID INSTANCE_ID START END true|false TITLE HH:MM RRULE|keep [TARGET_CALENDAR] DESCRIPTION", 64)
     if action == "delete" and (len(sys.argv) != 7 or sys.argv[6] != "--confirm"):
         fail("Usage: calendar-mutate delete instance|series CALENDAR UID INSTANCE_ID --confirm", 64)
 
@@ -522,6 +578,8 @@ def main() -> None:
     try:
         config = caldir_config()
         calendar_root = Path(config["calendar_dir"]).expanduser().resolve()
+        catalog = load_calendar_catalog()
+        resolve_calendar(catalog, calendar)
         calendar_path = (calendar_root / calendar).resolve()
         if calendar_path.parent != calendar_root or not calendar_path.is_dir():
             raise CalendarError("The selected calendar does not exist")
@@ -546,7 +604,13 @@ def main() -> None:
             else:
                 delete_instance(master, override, parameters, recurrence_value, backup_root)
         else:
-            start_iso, end_iso, all_day_text, title, time_text, recurrence_rule, description = sys.argv[6:13]
+            start_iso, end_iso, all_day_text, title, time_text, recurrence_rule = sys.argv[6:12]
+            if len(sys.argv) == 13:
+                target_calendar = calendar
+                description = sys.argv[12]
+            else:
+                target_calendar = sys.argv[12].strip()
+                description = sys.argv[13]
             title = title.strip()
             description = description.strip()
             if not title or "\r" in title or "\n" in title:
@@ -556,18 +620,31 @@ def main() -> None:
             all_day = all_day_text == "true"
             if all_day_text not in {"true", "false"}:
                 raise CalendarError("Invalid all-day value")
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", target_calendar):
+                raise CalendarError("The selected destination calendar is invalid")
+            writable_calendar(catalog, target_calendar)
+            target_calendar_path = catalog_calendar_path(catalog, target_calendar)
+
             if scope == "series":
                 edit_series(master[0], master[1], matches, title, description, time_text, all_day,
                             recurrence_rule, backup_root)
+                if target_calendar != calendar:
+                    move_series_files(matching_files(calendar_path, uid), target_calendar_path, backup_root)
             else:
                 if recurrence_rule != "keep":
                     raise CalendarError("An individual event cannot change the series schedule")
-                recurrence_tzid = parameters.split("TZID=", 1)[1] if "TZID=" in parameters else ""
-                if not all_day and not recurrence_tzid:
-                    recurrence_tzid = system_tzid()
-                edit_instance(master, override, parameters, recurrence_value, title, description, start_iso, end_iso,
-                              all_day, time_text, recurrence_tzid,
-                              calendar_path, backup_root)
+                if target_calendar != calendar:
+                    source_lines = override[1] if override else master[1]
+                    create_detached_occurrence(source_lines, target_calendar_path, title, description, start_iso,
+                                               end_iso, all_day, time_text)
+                    delete_instance(master, override, parameters, recurrence_value, backup_root)
+                else:
+                    recurrence_tzid = parameters.split("TZID=", 1)[1] if "TZID=" in parameters else ""
+                    if not all_day and not recurrence_tzid:
+                        recurrence_tzid = system_tzid()
+                    edit_instance(master, override, parameters, recurrence_value, title, description, start_iso, end_iso,
+                                  all_day, time_text, recurrence_tzid,
+                                  calendar_path, backup_root)
 
         refresh_cache()
         recurring = property_line(master[1], "RRULE") is not None
