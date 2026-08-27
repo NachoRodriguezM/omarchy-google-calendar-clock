@@ -238,6 +238,9 @@ fi
 
 config_json=$("$CALDIR_WRAPPER" config --json)
 calendar_dir=$(jq -er '.config.calendar_dir' <<<"$config_json")
+# Caldir stores the configured path verbatim (often "~/caldir"); expand it
+# before testing it, or the check below fails on a literal tilde.
+calendar_dir=${calendar_dir/#\~/$HOME}
 [[ -d "$calendar_dir" ]] || {
   echo "OAuth completed, but Caldir did not create its calendar directory." >&2
   exit 75

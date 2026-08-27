@@ -29,6 +29,7 @@ fi
 # Caldir stores a color alongside each local calendar. Build a small safe map
 # keyed by its directory slug, then attach it to the JSON UI contract.
 calendar_dir=$("$CALDIR_BIN" config --json | jq -r '.config.calendar_dir')
+calendar_dir=${calendar_dir/#\~/$HOME}
 calendar_meta=$(
   shopt -s nullglob
   for config in "$calendar_dir"/*/.caldir/config.toml; do
