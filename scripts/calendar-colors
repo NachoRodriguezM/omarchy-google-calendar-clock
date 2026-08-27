@@ -22,7 +22,9 @@ SESSION_DIR="${GOOGLE_CONFIG_DIR}/session"
 APP_CONFIG="${GOOGLE_CONFIG_DIR}/app_config.toml"
 
 calendar_dir=$("$CALDIR_BIN" config --json | jq -r '.config.calendar_dir')
-calendar_dir=${calendar_dir/#\~/$HOME}
+if [[ $calendar_dir == \~/* ]]; then
+  calendar_dir="${HOME}/${calendar_dir:2}"
+fi
 [[ -n "$calendar_dir" && -d "$calendar_dir" ]] || exit 0
 
 # toml_value <file> <key>: print the quoted value of a TOML key.

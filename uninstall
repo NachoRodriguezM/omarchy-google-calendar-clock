@@ -98,6 +98,9 @@ if [[ -x "${SCRIPT_DIR}/scripts/calendar-caldir" ]]; then
   calendar_dir=$("${SCRIPT_DIR}/scripts/calendar-caldir" config --json 2>/dev/null \
     | jq -r '.config.calendar_dir // empty' 2>/dev/null || true)
 fi
+if [[ $calendar_dir == \~/* ]]; then
+  calendar_dir="${HOME}/${calendar_dir:2}"
+fi
 if [[ -z "$calendar_dir" && -d "$DEFAULT_CALENDAR_DIR" ]]; then
   calendar_dir=$DEFAULT_CALENDAR_DIR
 fi
