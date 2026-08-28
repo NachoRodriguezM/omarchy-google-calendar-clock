@@ -176,6 +176,8 @@ Panel {
   //      sweep re-evaluate without polling timers.
   property date eventClock: new Date()
   property bool eventNotificationsEnabled: String(setting("eventNotifications", "true")).toLowerCase() !== "false"
+  readonly property string calendarPanelPosition: String(setting("calendarPanelPosition", "screen-center")).toLowerCase() === "original"
+    ? "original" : "screen-center"
   readonly property string calendarColorMode: String(setting("calendarColorMode", "google")).toLowerCase() === "theme"
     ? "theme" : "google"
   readonly property int settingsCardWidth: Style.space(300)
@@ -251,6 +253,18 @@ Panel {
     root.persistSettings({ calendarColorMode: next })
   }
 
+  function setCalendarPanelPosition(position) {
+    var next = String(position || "") === "original" ? "original" : "screen-center"
+    if (next === root.calendarPanelPosition) return
+    root.persistSettings({ calendarPanelPosition: next })
+    if (root.opened) {
+      Qt.callLater(function() {
+        if (!root.opened) return
+        root.calendarFrozenTop = next === "screen-center" ? root.calendarCenteredTop() : -1
+      })
+    }
+  }
+
   // Asks the runtime probe whether the Caldir binaries are installed. The
   // result lands in calendarRuntimeMissing, which drives the setup banner
   // and the sync-action gates.
@@ -303,7 +317,8 @@ Panel {
     // cleared rather than stuck on.
     Qt.callLater(function() {
       if (root.opened) {
-        root.calendarFrozenTop = root.calendarCenteredTop()
+        if (root.calendarPanelPosition === "screen-center")
+          root.calendarFrozenTop = root.calendarCenteredTop()
         setCenterHoverRevealSuppressed(true)
       }
     })
@@ -1329,12 +1344,24 @@ Panel {
   }
 
   // Keep KeyboardPanel's real gap untouched: it also defines the clickable
-  // bar strip. Position only its internal card, reached through the content
-  // holder that owns our key catcher, so empty screen space stays ordinary.
+  // bar strip. Screen-center mode positions only its internal card, reached
+  // through the content holder that owns our key catcher; original mode lets
+  // KeyboardPanel restore the stock clock's card-origin binding.
   Binding {
     target: keyCatcher.parent && keyCatcher.parent.parent ? keyCatcher.parent.parent : null
     property: "y"
+    when: root.calendarPanelPosition === "screen-center"
     value: root.calendarFrozenTop >= 0 ? root.calendarFrozenTop : root.calendarCenteredTop()
+  }
+
+  // On a left or right bar KeyboardPanel already centers the card vertically,
+  // so screen-center mode also needs to override its horizontal origin.
+  Binding {
+    target: keyCatcher.parent && keyCatcher.parent.parent ? keyCatcher.parent.parent : null
+    property: "x"
+    when: root.calendarPanelPosition === "screen-center" && root.bar
+      && (root.bar.position === "left" || root.bar.position === "right")
+    value: Math.max(panel.margin, Math.round((panel.screenW - panel.contentWidth) / 2))
   }
 
   component SettingsChoiceButton: Button {
@@ -1360,7 +1387,9 @@ Panel {
     centerOnBar: true
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(560))
-    contentHeight: root.calendarFittedHeight(calendarColumn.implicitHeight)
+    contentHeight: root.calendarPanelPosition === "screen-center"
+      ? root.calendarFittedHeight(calendarColumn.implicitHeight)
+      : panel.fittedContentHeight(calendarColumn.implicitHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -2625,7 +2654,20 @@ Button {
           : root.settingsCardOnLeft
             ? -panel.padding - Border.left(panel.borderSpec) - width - root.settingsCardGap
             : keyCatcher.width - width
-        y: -panel.padding - Border.top(panel.borderSpec)
+        // Screen-center mode always aligns with the calendar's top edge. In
+        // the stock (bar-adjacent) position, a bottom bar can leave too
+        // little room below, so only then lift the settings card to fit.
+        y: {
+          var natural = -panel.padding - Border.top(panel.borderSpec)
+          var needsBottomBarFit = root.calendarPanelPosition === "original"
+            && root.bar && root.bar.position === "bottom"
+          if (!needsBottomBarFit) return natural
+          var minimumTop = panel.margin
+          var maximumTop = panel.screenH - panel.margin - height
+          var fittedTop = Math.max(minimumTop,
+            Math.min(panel.cardOrigin.y, Math.max(minimumTop, maximumTop)))
+          return natural + fittedTop - panel.cardOrigin.y
+        }
         width: root.settingsCardWidth
         height: settingsColumn.implicitHeight + contentTopInset + contentBottomInset
         color: Color.popups.background
@@ -2677,6 +2719,63 @@ Button {
               focusable: true
               onClicked: root.toggleSettings()
             }
+          }
+
+          Rectangle {
+            width: parent.width
+            height: Style.spacing.hairline
+            color: root.contentForeground
+            opacity: 0.12
+          }
+
+          Text {
+            width: parent.width
+            text: "PANEL POSITION"
+            color: Qt.darker(root.contentForeground, 1.5)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.letterSpacing: 1
+          }
+
+          Row {
+            spacing: Style.spacing.md
+
+            SettingsChoiceButton {
+              optionValue: "screen-center"
+              currentValue: root.calendarPanelPosition
+              text: "SCREEN CENTER"
+              tooltipText: "Center the calendar vertically on the screen"
+              foreground: root.contentForeground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              onChosen: function(value) { root.setCalendarPanelPosition(value) }
+            }
+
+            SettingsChoiceButton {
+              optionValue: "original"
+              currentValue: root.calendarPanelPosition
+              text: "ORIGINAL"
+              tooltipText: "Place the calendar beside the bar like Omarchy's clock"
+              foreground: root.contentForeground
+              background: Color.popups.background
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              onChosen: function(value) { root.setCalendarPanelPosition(value) }
+            }
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: root.calendarPanelPosition === "screen-center"
+              ? "The calendar is vertically centered on the screen."
+              : "The calendar uses Omarchy's original clock position beside the bar."
+            color: Qt.darker(root.contentForeground, 1.65)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
           }
 
           Rectangle {
