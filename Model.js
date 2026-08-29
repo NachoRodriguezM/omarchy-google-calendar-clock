@@ -9,62 +9,198 @@ var MS_PER_DAY = 86400000
 // Locale.Saturday, so a locale's firstDayOfWeek can be passed straight in.
 var WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
-// ---- Bar label formats. Right-clicking the clock walks these in order and
-//      writes the result back to shell.json, so the label the bar shows and
-//      the format the config stores are always the same thing.
-//
-// The locale-shaped time presets are each followed by their 12-hour twin, so
-// the walk from a 24-hour label to the same label in AM/PM is a single right
-// click rather than a lap of the ring. The ISO preset is deliberately left
-// without one: ISO 8601 writes time on a 24-hour clock, so an AM/PM variant
-// would contradict the only thing that format is for.
-var CLOCK_FORMATS = [
+// ---- Format slots and strftime translation. Right-clicking walks exactly
+//      three slots (1→2→3→1), each a user-editable format whose active index
+//      is persisted; the old preset walk is superseded by these, and the
+//      slot defaults below keep the useful shapes of the old presets.
+
+var SLOT_DEFAULTS = [
   "dddd HH:mm",
-  "dddd h:mm AP",
-  "HH:mm",
-  "h:mm AP",
-  "ddd d MMM HH:mm",
-  "ddd d MMM h:mm AP",
-  "d MMMM 'W'ww yyyy",
+  "M月d日 dddd HH:mm",
   "yyyy-MM-dd HH:mm"
 ]
 
-// Vertical bars have room for a few stacked lines and nothing else, so the
-// ring stays short. AM/PM costs a fourth line, which is why only the plain
-// time carries it here.
-var VERTICAL_CLOCK_FORMATS = [
+var VERTICAL_SLOT_DEFAULTS = [
   "HH\n—\nmm",
-  "h\n—\nmm\nAP",
   "dd\nMMM\n'W'ww\n''yy",
-  "HH\nmm"
+  "ddd\nHH:mm"
 ]
 
-function clockFormats(vertical) {
-  return vertical ? VERTICAL_CLOCK_FORMATS.slice() : CLOCK_FORMATS.slice()
+// The ring is exactly the three slot formats in order. Cycling is index
+// arithmetic (nextSlot), so identical slot values stay in the ring — a
+// no-op visual cycle is accepted behavior.
+function clockSlotRing(slotFormats) {
+  return (slotFormats || []).slice()
 }
 
-// The presets in a fixed order, plus the configured alternate and current
-// format when they are something else. The order must not depend on which
-// entry is current: cycling writes the result back to shell.json, and a ring
-// that reshuffled itself around the current value would bounce between two
-// entries instead of walking.
-function clockFormatRing(configured, configuredAlt, presets) {
-  var ring = []
-  var candidates = (presets || []).concat([configuredAlt, configured])
-  for (var i = 0; i < candidates.length; i++) {
-    var format = String(candidates[i] === undefined || candidates[i] === null ? "" : candidates[i])
-    if (format === "" || ring.indexOf(format) !== -1) continue
-    ring.push(format)
+// Next active slot index, 1→2→3→1. `count` is the ring size; kept as a
+// parameter so the wrap is one modulo and nothing else.
+function nextSlot(active, count) {
+  return (Number(active) % Number(count)) + 1
+}
+
+// Format for one slot through the read-time migration chain: new key →
+// deprecated legacy key → slot default. Nothing is written back, so the old
+// keys keep working for downgrades and shared config files. Empty or missing
+// values fall through the chain; the stored value is never rewritten.
+function slotFormat(slot, settings, vertical) {
+  var cfg = settings === undefined || settings === null ? {} : settings
+  var key = (vertical ? "verticalFormat" : "format") + slot
+  var defaults = vertical ? VERTICAL_SLOT_DEFAULTS : SLOT_DEFAULTS
+  var value = cfg[key]
+  if (value === undefined || value === null || value === "") {
+    var legacy = slot === 1 ? key.slice(0, -1) : slot === 2 ? key.slice(0, -1) + "Alt" : null
+    if (legacy !== null) value = cfg[legacy]
   }
-  return ring.length > 0 ? ring : ["HH:mm"]
+  if (value === undefined || value === null || value === "") value = defaults[slot - 1]
+  return String(value)
 }
 
-// Next entry after `current`. An unknown current format (a hand-written one
-// that is not in the ring) starts the walk at the top.
-function nextClockFormat(ring, current) {
-  if (!ring || ring.length === 0) return ""
-  var index = ring.indexOf(String(current === undefined || current === null ? "" : current))
-  return ring[(index + 1) % ring.length]
+// A configured format containing '%' is strftime; anything else is a Qt
+// token format. A literal percent sign in a Qt-token format is therefore
+// misdetected as strftime — such a format has no meaning anyway.
+function isStrftimeFormat(format) {
+  return String(format).indexOf("%") !== -1
+}
+
+// Marker codes: '\x01<code>\x01' tokens the render layer replaces with
+// literals it computes from the date. Qt has no token for these values, and
+// the marker codes themselves must not look like Qt tokens — Qt expands
+// token letters anywhere in a format string, so markers are wrapped in
+// single quotes and Qt's quoted-literal rule passes them through verbatim.
+// Locale compound codes render via dateFormat/timeFormat/dateTimeFormat
+// (Locale.ShortFormat) — the QML Locale type has no ShortDate/ShortTime
+// members (spec §62 transcription note).
+//   pd pm pH ph pM pS  space-padded day/month/hour24/hour12/minute/second
+//   I   zero-padded 12-hour            i   unpadded 12-hour
+//   C   century (two digits)            j   day of year (three digits)
+//   U   week of year, Sunday start      W   week of year, Monday start
+//   V   ISO week                        u   weekday 1-7 (Monday=1)
+//   w   weekday 0-6 (Sunday=0)          z   UTC offset +0800
+//   zc  UTC offset +08:00               s   epoch seconds
+//   x   locale short date               X   locale short time
+//   c   locale short format
+function marker(code) {
+  return "'\x01" + code + "\x01'"
+}
+
+// %- (no pad) / %0 (zero pad) / %_ (space pad → marker). %e/%k/%l default
+// to space padding, so their default is a marker while %0 is the padded
+// Qt token. %I and %l are 12-hour values — Qt's h/hh tokens only render
+// 12-hour when an AP token is present, so they are computed markers too
+// (%I zero-padded, %l space-padded, %- unpadded).
+var STRFTIME_DIRECT = {
+  m: ["MM", "M", "MM", marker("pm")],
+  d: ["dd", "d", "dd", marker("pd")],
+  e: [marker("pd"), "d", "dd", marker("pd")],
+  H: ["HH", "H", "HH", marker("pH")],
+  I: [marker("I"), marker("i"), marker("I"), marker("ph")],
+  k: [marker("pH"), "H", "HH", marker("pH")],
+  l: [marker("ph"), marker("i"), marker("I"), marker("ph")],
+  M: ["mm", "m", "mm", marker("pM")],
+  S: ["ss", "s", "ss", marker("pS")]
+}
+
+// Name specifiers and fixed-width numerics; modifiers are invalid on these.
+var STRFTIME_FIXED = {
+  a: "ddd",
+  A: "dddd",
+  b: "MMM",
+  h: "MMM",
+  B: "MMMM",
+  p: "AP",
+  P: "ap",
+  Y: "yyyy",
+  y: "yy"
+}
+
+// Hand-computed specifiers, each a marker the render layer expands.
+var STRFTIME_HAND = {
+  C: marker("C"),
+  j: marker("j"),
+  U: marker("U"),
+  W: marker("W"),
+  V: marker("V"),
+  u: marker("u"),
+  w: marker("w"),
+  z: marker("z"),
+  s: marker("s")
+}
+
+// Composite formats spelled out in Qt tokens.
+var STRFTIME_EXPAND = {
+  D: "MM/dd/yy",
+  F: "yyyy-MM-dd",
+  R: "HH:mm",
+  T: "HH:mm:ss",
+  r: "hh:mm:ss AP",
+  n: "\n",
+  t: "\t"
+}
+
+// Locale compound formats, rendered by the locale object itself.
+var STRFTIME_LOCALE = {
+  x: marker("x"),
+  X: marker("X"),
+  c: marker("c")
+}
+
+// Translates a strftime format to Qt tokens (with markers), or null when any
+// specifier is unknown or unsupported — the caller then falls back to the
+// slot default without touching the stored value.
+function strftimeToQtFormat(format) {
+  var text = String(format)
+  var out = ""
+  for (var i = 0; i < text.length; i++) {
+    var ch = text.charAt(i)
+    if (ch !== "%") {
+      out += ch
+      continue
+    }
+    var mod = ""
+    var next = text.charAt(i + 1)
+    if (next === "-" || next === "0" || next === "_") {
+      mod = next
+      i++
+      next = text.charAt(i + 1)
+    }
+    if (next === "") return null
+    if (next === "%") {
+      if (mod !== "") return null
+      out += "%"
+      i++
+      continue
+    }
+    if (next === ":") {
+      if (mod !== "" || text.charAt(i + 2) !== "z") return null
+      out += marker("zc")
+      i += 2
+      continue
+    }
+    var direct = STRFTIME_DIRECT[next]
+    if (direct) {
+      out += mod === "-" ? direct[1] : mod === "0" ? direct[2] : mod === "_" ? direct[3] : direct[0]
+      i++
+      continue
+    }
+    if (mod !== "") return null
+    // The four tables have disjoint keys, so lookup order does not matter.
+    var tables = [STRFTIME_FIXED, STRFTIME_HAND, STRFTIME_EXPAND, STRFTIME_LOCALE]
+    var found = false
+    for (var t = 0; t < tables.length; t++) {
+      if (tables[t][next] !== undefined) {
+        out += tables[t][next]
+        found = true
+        break
+      }
+    }
+    if (found) {
+      i++
+      continue
+    }
+    return null
+  }
+  return out
 }
 
 // Two-digit ISO week, substituted into a format's 'ww' token before Qt
@@ -288,9 +424,11 @@ if (typeof module !== "undefined") {
     lifeProgressPercent: lifeProgressPercent,
     monthGrid: monthGrid,
     stepMonth: stepMonth,
-    clockFormats: clockFormats,
-    clockFormatRing: clockFormatRing,
-    nextClockFormat: nextClockFormat,
+    isStrftimeFormat: isStrftimeFormat,
+    strftimeToQtFormat: strftimeToQtFormat,
+    clockSlotRing: clockSlotRing,
+    nextSlot: nextSlot,
+    slotFormat: slotFormat,
     isoWeekLiteral: isoWeekLiteral
   }
 }

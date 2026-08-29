@@ -32,6 +32,22 @@ Panel {
   // slot up the same way.
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
+  // The locale the bar injects (BarWidget.injectPanel). Every date/time
+  // string renders through resolvedLocale(): the injected object wins, and
+  // only a panel that got no injection resolves the `locale` setting itself.
+  property var locale: null
+
+  // Fallback identical to BarWidget's: a bogus locale name silently becomes
+  // the C locale, so the normalized name is checked and anything that does
+  // not resolve falls back to the system locale — an override typo must not
+  // render English. Keep this copy in lockstep with BarWidget.resolvedLocale.
+  function resolvedLocale() {
+    if (root.locale) return root.locale
+    var name = String(setting("locale", "system"))
+    if (name === "" || name === "system") return Qt.locale()
+    var loc = Qt.locale(name)
+    return loc.name === "C" || loc.name === "" ? Qt.locale() : loc
+  }
 
   // ---- Today. SystemClock keeps this honest across midnight so the
   //      highlight rolls over without the panel being reopened.
@@ -67,11 +83,7 @@ Panel {
   // convention. Clicking the grid's "W" heading writes the choice back to
   // shell.json.
   readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), Qt.locale().firstDayOfWeek)
-  // The interface is English throughout, so day names are not taken from the
-  // system locale. Where the week starts still is: that is a regional
-  // convention rather than a translation, and it stays overridable above.
-  readonly property var labelLocale: Qt.locale("en_US")
-  readonly property string nextWeekStartLabel: labelLocale.dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat)
+  readonly property string nextWeekStartLabel: resolvedLocale().dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat)
   readonly property var weekdays: Model.weekdayOrder(weekStart)
   readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey)
 
@@ -696,7 +708,7 @@ Panel {
     if (event && event.all_day) return "ALL DAY"
     var start = new Date(event && event.start)
     if (isNaN(start.getTime())) return ""
-    return Qt.formatTime(start, "HH:mm")
+    return resolvedLocale().toString(start, "HH:mm")
   }
 
   function eventKeyFor(event) {
@@ -805,7 +817,7 @@ Panel {
   function lastPullLabel() {
     if (lastCalendarPull === "") return "Not pulled from Google yet"
     var date = new Date(lastCalendarPull)
-    return isNaN(date.getTime()) ? "Pulled from Google" : "Last pull: " + Qt.formatDateTime(date, "d MMM, HH:mm")
+    return isNaN(date.getTime()) ? "Pulled from Google" : "Last pull: " + resolvedLocale().toString(date, "d MMM, HH:mm")
   }
 
   function pullFromGoogle() {
@@ -867,7 +879,7 @@ Panel {
   function prefetchRangeLabel() {
     var start = new Date(prefetchStartDate() + "T12:00:00")
     var end = new Date(prefetchEndDate() + "T12:00:00")
-    return Qt.formatDate(start, "MMM yyyy") + "–" + Qt.formatDate(end, "MMM yyyy")
+    return resolvedLocale().toString(start, "MMM yyyy") + "–" + resolvedLocale().toString(end, "MMM yyyy")
   }
 
   // When browsing reaches the last two cached months, fetch another window
@@ -1022,7 +1034,7 @@ Panel {
 
   // English short day names, matching the rest of the interface.
   function weekdayLabel(weekday) {
-    return String(labelLocale.dayName(weekday, Locale.ShortFormat)).toUpperCase()
+    return String(resolvedLocale().dayName(weekday, Locale.ShortFormat)).replace(/\.$/, "").toUpperCase()
   }
 
   SystemClock {
@@ -1459,7 +1471,7 @@ Panel {
               Text {
                 id: heroDate
                 anchors.verticalCenter: parent.verticalCenter
-                text: Qt.formatDate(root.today, "MMMM d")
+                text: resolvedLocale().toString(root.today, "MMMM d")
                 color: heroMouse.containsMouse
                   ? Style.hoverStateColor(root.contentForeground, Color.accent)
                   : root.contentForeground
@@ -1908,7 +1920,7 @@ Panel {
                 // "MAY 2026" and a "SEPTEMBER 2026".
                 width: Style.space(130)
                 horizontalAlignment: Text.AlignHCenter
-                text: Qt.formatDate(root.viewDate, "MMMM yyyy").toUpperCase()
+                text: resolvedLocale().toString(root.viewDate, "MMMM yyyy").toUpperCase()
                 color: Qt.darker(root.contentForeground, 1.4)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.body
@@ -1968,7 +1980,7 @@ Panel {
                 id: agendaLabel
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: Qt.formatDate(new Date(root.agendaDateKey + "T12:00:00"), "dddd, MMMM d").toUpperCase()
+                text: resolvedLocale().toString(new Date(root.agendaDateKey + "T12:00:00"), "dddd, MMMM d").toUpperCase()
                 color: Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall

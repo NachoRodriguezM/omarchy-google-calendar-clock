@@ -94,6 +94,82 @@ shell startup, and pulls every 30 minutes. Automatic refresh never pushes your
 local changes. The cache is stored at
 `~/.local/state/omarchy/calendar-cache.json` with owner-only permissions.
 
+## Clock formats
+
+The clock label has three customizable format slots. Right-click the clock to
+cycle them in order (1 → 2 → 3 → 1); the active slot survives restarts.
+Horizontal and vertical bars have independent slot values. Settings live in
+the plugin's entry in shell.json.
+
+| Setting | Meaning |
+|---|---|
+| `format1` / `format2` / `format3` | Horizontal slots 1–3 |
+| `verticalFormat1` … `verticalFormat3` | Vertical slots 1–3 |
+| `activeFormatSlot` | Active slot (1–3, default 1); shared between orientations |
+| `locale` | Language for month/weekday names: `system` (default, follows the system locale) or a Qt/BCP-47 locale name such as `zh_TW` or `en_US`. An invalid value falls back to the system locale. |
+
+For example, the plugin's entry in shell.json could look like this:
+
+```json
+{
+  "id": "omarchy-google-calendar-clock",
+  "locale": "system",
+  "format1": "dddd HH:mm",
+  "format2": "M月d日 dddd HH:mm",
+  "format3": "%Y年%m月%d日 %A %H:%M",
+  "activeFormatSlot": 1
+}
+```
+
+Unset slots fall back to these defaults:
+
+| Slot | Horizontal | Vertical |
+|---|---|---|
+| 1 | `dddd HH:mm` | `HH\n—\nmm` |
+| 2 | `M月d日 dddd HH:mm` | `dd\nMMM\n'W'ww\n''yy` |
+| 3 | `yyyy-MM-dd HH:mm` | `ddd\nHH:mm` |
+
+A slot value containing `%` is interpreted as a strftime format (as in
+`date(1)`) and translated to Qt tokens for rendering; anything else is a Qt
+token format such as `dddd HH:mm` or `'W'ww yyyy`. Invalid or unsupported
+strftime formats fall back to the slot's default without changing the stored
+value.
+
+### strftime support
+
+| Specifier | Meaning | Implementation |
+|---|---|---|
+| `%Y` `%y` `%C` | year / 2-digit year / century | Qt `yyyy` `yy`; century computed |
+| `%m` `%d` `%e` | month / zero-padded day / space-padded day | Qt `MM` `dd`; `%e` computed |
+| `%H` `%I` `%k` `%l` | 24h / 12h / space-padded 24h / space-padded 12h | Qt `HH`; `%I` `%k` `%l` computed |
+| `%M` `%S` | minute / second | Qt `mm` `ss` |
+| `%p` `%P` | localized AM/PM, upper / lower | Qt `AP` `ap` |
+| `%a` `%A` | abbreviated / full weekday name | Qt `ddd` `dddd` |
+| `%b` `%h` `%B` | abbreviated / full month name | Qt `MMM` `MMMM` |
+| `%j` | day of year | computed |
+| `%u` `%w` | weekday number, Monday=1 / Sunday=0 | computed |
+| `%U` `%W` `%V` | week of year, Sunday start / Monday start / ISO | computed |
+| `%D` `%F` `%R` `%T` `%r` | `MM/dd/yy` / `yyyy-MM-dd` / `HH:mm` / `HH:mm:ss` / `hh:mm:ss AP` | expanded |
+| `%x` `%X` `%c` | locale short date / short time / short format | rendered with the resolved locale |
+| `%z` `%:z` `%s` | UTC offset `+0800` / `+08:00` / epoch seconds | computed |
+| `%n` `%t` `%%` | newline / tab / literal `%` | literal |
+
+Padding modifiers work on numeric fields: `%-` (no padding), `%0` (zero
+padding), `%_` (space padding). For example `%e` is the space-padded day and
+`%-d` the unpadded day.
+
+Not supported (the format falls back to the slot default): `%Z` (timezone
+abbreviation — no Intl in the shell's JS engine), `%N` (fractional seconds),
+`%E*`/`%O*` (POSIX alternate forms), and any specifier not listed above.
+
+### Upgrading from earlier versions
+
+The previous single-format settings still work: `format`, `formatAlt`,
+`verticalFormat`, and `verticalFormatAlt` are read as the values for slots 1
+and 2 when the new keys are unset. They are deprecated — new writes use
+`format1..3` and `verticalFormat1..3` — but existing values keep working until
+you overwrite them.
+
 ## Update
 
 ```bash
