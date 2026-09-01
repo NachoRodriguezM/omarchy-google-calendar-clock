@@ -369,7 +369,11 @@ Panel {
     if (panel.screenH <= 0) return Math.round(desired)
     var bounds = root.calendarVerticalBounds()
     var top = root.calendarFrozenTop >= 0 ? root.calendarFrozenTop : bounds.top
-    return Math.round(Math.min(desired, Math.max(panel.verticalContentInset, bounds.bottom - top)))
+    // A centered calendar keeps its opening y position as its contents grow.
+    // Let it use the screen below that fixed edge; using bounds.bottom here
+    // reserves the bottom bar a second time and clips the event form.
+    var bottom = root.calendarFrozenTop >= 0 ? panel.screenH - Style.gapsOut : bounds.bottom
+    return Math.round(Math.min(desired, Math.max(panel.verticalContentInset, bottom - top)))
   }
 
   function toggle() {
@@ -1427,6 +1431,9 @@ Panel {
           // lose its last days off the edge instead of scrolling.
           width: Math.max(calendarScroll.width, gridColumn.width)
           spacing: Style.space(8)
+          // Keep the last control clear of the card edge when the agenda
+          // switches from its compact list to the event editor.
+          bottomPadding: Style.space(12)
 
           // ---- Hero: today, centered. Once the view has stepped back
           //      it is also the way home — clicking the date you are
