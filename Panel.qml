@@ -22,6 +22,9 @@ Panel {
   moduleName: "omarchy-google-calendar-clock"
   ipcTarget: "omarchy-google-calendar-clock"
   manageIpc: false
+  // Keep this in step with manifest.json so the installed panel can identify
+  // its release without reading files from Quickshell's sandbox.
+  readonly property string pluginVersion: "0.1.9"
 
   property var anchorItem: null
 
@@ -2964,10 +2967,33 @@ Button {
           Button {
             text: "Remove plugin and data…"
             tooltipText: "Open the interactive full-uninstall flow"
+            foreground: root.contentForeground
+            background: Color.popups.background
+            accent: Color.accent
+            fontFamily: root.contentFontFamily
             fontSize: Style.font.caption
             horizontalPadding: Style.space(6)
             verticalPadding: Style.space(2)
+            bordered: true
+            focusable: true
+            // Match the settings choices: keep the fill stable on hover and
+            // leave only the immediate hover border feedback.
+            color: background
             onClicked: root.runPluginUninstall()
+          }
+
+          Item {
+            width: parent.width
+            height: settingsVersionLabel.implicitHeight
+
+            Text {
+              id: settingsVersionLabel
+              anchors.right: parent.right
+              text: "v" + root.pluginVersion
+              color: Qt.darker(root.contentForeground, 1.8)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
         }
       }

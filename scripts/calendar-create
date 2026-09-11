@@ -25,7 +25,7 @@ def escape_text(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
 
 
-def atomic_add_metadata(path: Path, rrule: str, description: str) -> None:
+def atomic_add_metadata(path: Path, rrule: str, description: str, use_google_defaults: bool) -> None:
     lines = path.read_text(encoding="utf-8").replace("\r\n", "\n").splitlines()
     if rrule and any(line.upper().startswith("RRULE:") for line in lines):
         fail("The new event unexpectedly already has a recurrence rule", 1)
@@ -35,6 +35,11 @@ def atomic_add_metadata(path: Path, rrule: str, description: str) -> None:
         metadata.append("RRULE:" + rrule)
     if description:
         metadata.append("DESCRIPTION:" + escape_text(description))
+    # Caldir 0.13.1 distinguishes an event with no alarms from one that uses
+    # the calendar's Google-side defaults. The clock has historically created
+    # alarm-free events that retain those defaults, so preserve that contract.
+    if use_google_defaults:
+        metadata.append("X-GOOGLE-DEFAULT-REMINDERS:TRUE")
     lines[insert_at:insert_at] = metadata
     payload = ("\r\n".join(lines) + "\r\n").encode("utf-8")
     descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
@@ -118,9 +123,14 @@ def main() -> None:
         rrule = "FREQ=" + frequencies[repeat]
         if count_text:
             rrule += ";COUNT=" + count_text
-    if rrule or description:
+    google_config = calendar_path / ".caldir" / "config.toml"
+    use_google_defaults = bool(re.search(
+        r'(?m)^provider\s*=\s*"google"\s*$',
+        google_config.read_text(encoding="utf-8") if google_config.is_file() else "",
+    ))
+    if rrule or description or use_google_defaults:
         try:
-            atomic_add_metadata(created_path, rrule, description)
+            atomic_add_metadata(created_path, rrule, description, use_google_defaults)
         except (OSError, UnicodeError) as error:
             fail("Event was created, but its calendar details could not be saved", 1)
 

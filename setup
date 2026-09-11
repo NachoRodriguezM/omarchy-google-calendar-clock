@@ -5,7 +5,7 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PLUGIN_ID="omarchy-google-calendar-clock"
 BUILTIN_ID="omarchy.clock"
-CALDIR_VERSION="0.12.0"
+CALDIR_VERSION="0.13.1"
 DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"
@@ -50,7 +50,7 @@ while (( $# > 0 )); do
   shift
 done
 
-for dependency in curl jq tar sha256sum omarchy; do
+for dependency in curl jq tar sha256sum omarchy python3; do
   command -v "$dependency" >/dev/null || {
     echo "Missing required Omarchy tool: ${dependency}" >&2
     exit 127
@@ -149,7 +149,7 @@ activate_plugin() {
   omarchy-shell shell reloadConfig >/dev/null 2>&1 || true
 }
 
-echo "Downloading Omarchy Google Calendar and Clock's patched Caldir ${VERSION} for ${ASSET_ARCH}..."
+echo "Downloading Omarchy Google Calendar and Clock's Caldir ${CALDIR_VERSION} runtime for ${ASSET_ARCH}..."
 curl --fail --location --silent --show-error "${RELEASE_BASE}/${ASSET}" --output "${WORK_DIR}/${ASSET}"
 printf '%s  %s\n' "$EXPECTED_SHA256" "$ASSET" | (
   cd "$WORK_DIR"
@@ -186,6 +186,11 @@ if [[ -e "$BIN_DIR" ]]; then
 fi
 mv -- "$NEW_BIN_DIR" "$BIN_DIR"
 BIN_SWAPPED=true
+
+# Caldir 0.13.1 makes an alarm-free event mean "no reminders" unless this
+# marker is present. Older plugin releases used alarm-free events to inherit
+# Google's calendar defaults, so migrate that local representation once.
+"${SCRIPT_DIR}/scripts/calendar-reminder-migrate"
 
 if $BINARIES_ONLY; then
   OAUTH_COMPLETE=true

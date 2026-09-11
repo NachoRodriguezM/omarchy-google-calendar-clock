@@ -7,8 +7,9 @@ permissions:
   contents: write
 
 env:
-  CALDIR_COMMIT: 65d3b5aa8a0c9eba0ffef365f14f2b41ba3d9dff
-  CALDIR_VERSION: 0.12.0
+  CALDIR_TAG: v0.13.1
+  CALDIR_VERSION: 0.13.1
+  CALDIR_LICENSE_SHA256: 4070e6f25087efeb17ccb59b10d7f6d32622358db52438546dd030bcfb4809a5
 
 jobs:
   resolve:
@@ -36,8 +37,12 @@ jobs:
         include:
           - runner: ubuntu-24.04
             arch: x86_64
+            upstream_arch: x86_64
+            upstream_sha256: 9990fead337e581ce1a6db0af41fbd0436c9a8672880864e4ebe7845254b4c57
           - runner: ubuntu-24.04-arm
             arch: aarch64
+            upstream_arch: aarch64
+            upstream_sha256: 0c212791751f053ce32efdd1f232a48552460247b001e1cc7a13fc613416511f
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -50,20 +55,20 @@ jobs:
           ! grep -Eq '<repository-url>|<raw-install-url>' README.md
           ! find . -type f -name '*.ics' -print -quit | grep -q .
 
-      - name: Install Rust
+      - name: Download verified upstream Caldir runtime
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Prepare patched Caldir source
-        run: |
-          git clone https://github.com/t4t5/caldir.git "$RUNNER_TEMP/caldir"
-          git -C "$RUNNER_TEMP/caldir" checkout --detach "$CALDIR_COMMIT"
-          git -C "$RUNNER_TEMP/caldir" apply "$GITHUB_WORKSPACE/patches/caldir-google.patch"
-
-      - name: Build binaries
-        working-directory: ${{ runner.temp }}/caldir
-        run: cargo build --locked --release -p caldir-cli -p caldir-provider-google
+          set -euo pipefail
+          archive="caldir-${{ matrix.upstream_arch }}-unknown-linux-musl.tar.gz"
+          base="https://github.com/t4t5/caldir/releases/download/${CALDIR_TAG}"
+          curl --fail --location --silent --show-error "$base/$archive" --output "$RUNNER_TEMP/$archive"
+          printf '%s  %s\n' "${{ matrix.upstream_sha256 }}" "$RUNNER_TEMP/$archive" | sha256sum --check --status -
+          curl --fail --location --silent --show-error \
+            "https://raw.githubusercontent.com/t4t5/caldir/${CALDIR_TAG}/LICENSE" \
+            --output "$RUNNER_TEMP/CALDIR-LICENSE"
+          printf '%s  %s\n' "$CALDIR_LICENSE_SHA256" "$RUNNER_TEMP/CALDIR-LICENSE" | sha256sum --check --status -
+          mkdir -p "$RUNNER_TEMP/caldir-runtime"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/caldir-runtime" ./caldir ./caldir-provider-google
+          "$RUNNER_TEMP/caldir-runtime/caldir" --version | grep -Fx "caldir-cli ${CALDIR_VERSION}"
 
       - name: Package and checksum
         run: |
@@ -71,12 +76,12 @@ jobs:
           asset="omarchy-google-calendar-clock-caldir-${version}-${{ matrix.arch }}-linux.tar.gz"
           package="$RUNNER_TEMP/package"
           mkdir -p "$package"
-          install -m 0755 "$RUNNER_TEMP/caldir/target/release/caldir" "$package/caldir"
-          install -m 0755 "$RUNNER_TEMP/caldir/target/release/caldir-provider-google" "$package/caldir-provider-google"
-          install -m 0644 "$RUNNER_TEMP/caldir/LICENSE" "$package/CALDIR-LICENSE"
+          install -m 0755 "$RUNNER_TEMP/caldir-runtime/caldir" "$package/caldir"
+          install -m 0755 "$RUNNER_TEMP/caldir-runtime/caldir-provider-google" "$package/caldir-provider-google"
+          install -m 0644 "$RUNNER_TEMP/CALDIR-LICENSE" "$package/CALDIR-LICENSE"
           strip "$package/caldir" "$package/caldir-provider-google"
-          printf 'Caldir commit: %s\nCaldir version: %s\nOmarchy Google Calendar and Clock version: %s\nPlugin source commit: %s\nArchitecture: %s\n' \
-            "$CALDIR_COMMIT" "$CALDIR_VERSION" "$version" "${{ needs.resolve.outputs.source_commit }}" "${{ matrix.arch }}" > "$package/BUILD-INFO"
+          printf 'Caldir release: %s\nCaldir version: %s\nCaldir archive SHA-256: %s\nOmarchy Google Calendar and Clock version: %s\nPlugin source commit: %s\nArchitecture: %s\n' \
+            "$CALDIR_TAG" "$CALDIR_VERSION" "${{ matrix.upstream_sha256 }}" "$version" "${{ needs.resolve.outputs.source_commit }}" "${{ matrix.arch }}" > "$package/BUILD-INFO"
           tar -C "$package" -czf "$asset" BUILD-INFO CALDIR-LICENSE caldir caldir-provider-google
           sha256sum "$asset" > "${asset}.sha256"
 

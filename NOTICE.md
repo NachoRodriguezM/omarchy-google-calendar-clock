@@ -3,13 +3,14 @@
 Omarchy Google Calendar and Clock began as a clone of Omarchy's built-in
 clock plugin. Omarchy is MIT licensed by David Heinemeier Hansson.
 
-`patches/caldir-google.patch` modifies the MIT-licensed Caldir Google provider:
+The plugin redistributes the MIT-licensed Caldir CLI and Google provider:
 
 > Copyright (c) 2025 T4T5
 
 The full MIT terms applying to this repository and its derived portions are in
 [LICENSE](LICENSE).
 
-Release assets include the patched Caldir executables and a copy of Caldir's
-original MIT license. They are built transparently from the pinned source commit
-by `.github/workflows/release.yml`; no local executable is committed here.
+Release assets include verified upstream Caldir executables and a copy of
+Caldir's original MIT license. `.github/workflows/release.yml` pins and
+checksums the upstream release archive before repackaging only the CLI and
+Google provider; no local executable is committed here.
