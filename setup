@@ -5,7 +5,7 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PLUGIN_ID="omarchy-google-calendar-clock"
 BUILTIN_ID="omarchy.clock"
-CALDIR_VERSION="0.13.1"
+CALDIR_VERSION="0.14.3"
 DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 INSTALL_ROOT="${DATA_HOME}/omarchy-google-calendar-clock"
@@ -187,7 +187,7 @@ fi
 mv -- "$NEW_BIN_DIR" "$BIN_DIR"
 BIN_SWAPPED=true
 
-# Caldir 0.13.1 makes an alarm-free event mean "no reminders" unless this
+# Caldir makes an alarm-free event mean "no reminders" unless this
 # marker is present. Older plugin releases used alarm-free events to inherit
 # Google's calendar defaults, so migrate that local representation once.
 "${SCRIPT_DIR}/scripts/calendar-reminder-migrate"

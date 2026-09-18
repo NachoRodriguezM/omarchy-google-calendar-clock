@@ -24,7 +24,7 @@ Panel {
   manageIpc: false
   // Keep this in step with manifest.json so the installed panel can identify
   // its release without reading files from Quickshell's sandbox.
-  readonly property string pluginVersion: "0.1.9"
+  readonly property string pluginVersion: "0.1.10"
 
   property var anchorItem: null
 

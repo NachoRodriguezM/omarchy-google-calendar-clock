@@ -25,7 +25,7 @@ Each release includes one committed SHA-256 digest per architecture. Setup
 verifies the downloaded archive against the digest in the installed plugin
 checkout before extracting or executing it.
 
-When upgrading to the bundled Caldir 0.13.1 runtime, setup preserves the
+When upgrading to the bundled Caldir 0.13.1-or-later runtime, setup preserves the
 existing Google-default reminder behavior for alarm-free local events. It adds
 the standard Caldir marker atomically and skips events that already have an
 explicit alarm or reminder marker.

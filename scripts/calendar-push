@@ -39,10 +39,11 @@ if [[ $output == *"Cannot create recurring instance override without master's"* 
   printf '%s\n' "$output"
 fi
 
-# Caldir currently reports per-calendar/provider failures as text while its
-# top-level command still exits successfully. Do not let the shell UI turn
-# those failures into a false "Pushed" banner.
-if (( exit_code == 0 )) && [[ $output =~ (Remote\ error:|Provider\ error:|Provider\ returned\ error:|Error\ handling\ request:|Failed\ to) ]]; then
+# Caldir reports per-calendar/provider failures as text while its top-level
+# command can still exit successfully. Normalize case because v0.14 changed
+# messages such as "Error handling request" to "failed to update event".
+error_output=${output,,}
+if (( exit_code == 0 )) && [[ $error_output =~ (remote\ error:|provider\ error:|provider\ returned\ error:|error\ handling\ request:|failed\ to) ]]; then
   exit 1
 fi
 

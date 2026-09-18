@@ -7,8 +7,8 @@ permissions:
   contents: write
 
 env:
-  CALDIR_TAG: v0.13.1
-  CALDIR_VERSION: 0.13.1
+  CALDIR_TAG: v0.14.3
+  CALDIR_VERSION: 0.14.3
   CALDIR_LICENSE_SHA256: 4070e6f25087efeb17ccb59b10d7f6d32622358db52438546dd030bcfb4809a5
 
 jobs:
@@ -38,11 +38,11 @@ jobs:
           - runner: ubuntu-24.04
             arch: x86_64
             upstream_arch: x86_64
-            upstream_sha256: 9990fead337e581ce1a6db0af41fbd0436c9a8672880864e4ebe7845254b4c57
+            upstream_sha256: a4a1eac9c743d5b0ab7c8a49c55a7628e22cb11cc38ff425c8b7a81d08eb0505
           - runner: ubuntu-24.04-arm
             arch: aarch64
             upstream_arch: aarch64
-            upstream_sha256: 0c212791751f053ce32efdd1f232a48552460247b001e1cc7a13fc613416511f
+            upstream_sha256: be0b41923023d9f42f71c1cb708ed66b96fad25a7d33d6c1683c1c5d59e2ff9d
     runs-on: ${{ matrix.runner }}
 
     steps:

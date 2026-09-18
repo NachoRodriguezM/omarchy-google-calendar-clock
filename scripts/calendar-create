@@ -35,7 +35,7 @@ def atomic_add_metadata(path: Path, rrule: str, description: str, use_google_def
         metadata.append("RRULE:" + rrule)
     if description:
         metadata.append("DESCRIPTION:" + escape_text(description))
-    # Caldir 0.13.1 distinguishes an event with no alarms from one that uses
+    # Caldir distinguishes an event with no alarms from one that uses
     # the calendar's Google-side defaults. The clock has historically created
     # alarm-free events that retain those defaults, so preserve that contract.
     if use_google_defaults:
