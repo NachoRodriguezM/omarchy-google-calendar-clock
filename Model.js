@@ -262,6 +262,36 @@ function monthGrid(year, month, weekStart, todayKey) {
   return weeks
 }
 
+// Capitalize localized date names even when the locale normally writes them
+// in lowercase (for example, Spanish weekdays and months).
+function capitalizeDateNames(text, locale) {
+  var names = []
+  for (var i = 0; i < 7; i++) {
+    names.push(locale.dayName(i, Locale.LongFormat), locale.dayName(i, Locale.ShortFormat))
+  }
+  for (var m = 0; m < 12; m++) {
+    names.push(locale.monthName(m, Locale.LongFormat), locale.monthName(m, Locale.ShortFormat))
+    names.push(locale.standaloneMonthName(m, Locale.LongFormat), locale.standaloneMonthName(m, Locale.ShortFormat))
+  }
+  names.sort(function(a, b) { return b.length - a.length })
+  var result = String(text)
+  for (var n = 0; n < names.length; n++) {
+    var name = String(names[n] || "")
+    if (name.length < 2 || name.charAt(0) === name.charAt(0).toUpperCase()) continue
+    var index = 0
+    while ((index = result.indexOf(name, index)) !== -1) {
+      var before = index > 0 ? result.charAt(index - 1) : ""
+      var after = result.charAt(index + name.length)
+      var beforeLetter = before && before.toUpperCase() !== before.toLowerCase()
+      var afterLetter = after && after.toUpperCase() !== after.toLowerCase()
+      if (!beforeLetter && !afterLetter)
+        result = result.slice(0, index) + name.charAt(0).toUpperCase() + result.slice(index + 1)
+      index += name.length
+    }
+  }
+  return result
+}
+
 function stepMonth(year, month, delta) {
   var target = new Date(year, Number(month) + Number(delta), 1)
   return { year: target.getFullYear(), month: target.getMonth() }
