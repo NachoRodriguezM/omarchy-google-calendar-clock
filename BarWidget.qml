@@ -28,6 +28,7 @@ BarWidget {
   // What the bar shows is what shell.json stores, so a cycled format is the
   // format from then on rather than something that reverts on restart.
   readonly property string activeFormat: configuredFormat
+  readonly property bool showsSeconds: Model.clockNeedsSeconds(activeFormat)
   readonly property string displayText: formatted(displayDate)
   readonly property var verticalLines: displayText.split("\n")
 
@@ -112,9 +113,9 @@ BarWidget {
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
 
-  SystemClock {
+  WallClock {
     id: clock
-    precision: SystemClock.Minutes
+    step: root.showsSeconds ? 1000 : 60000
     onDateChanged: root.displayDate = date
   }
 
