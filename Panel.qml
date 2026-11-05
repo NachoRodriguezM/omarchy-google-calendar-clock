@@ -25,7 +25,7 @@ Panel {
   Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
   // Keep this in step with manifest.json so the installed panel can identify
   // its release without reading files from Quickshell's sandbox.
-  readonly property string pluginVersion: "0.1.10"
+  readonly property string pluginVersion: "0.2.0"
 
   property var anchorItem: null
 
