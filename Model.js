@@ -39,6 +39,13 @@ var VERTICAL_CLOCK_FORMATS = [
   "HH\nmm"
 ]
 
+// Only formats that actually show seconds need a one-second clock tick.
+// Ignore quoted literals (e.g. the "s" in 'Sat').
+function clockNeedsSeconds(format) {
+  var text = String(format === undefined || format === null ? "" : format)
+  return /s/.test(text.replace(/'[^']*'?/g, ""))
+}
+
 function clockFormats(vertical) {
   return vertical ? VERTICAL_CLOCK_FORMATS.slice() : CLOCK_FORMATS.slice()
 }
@@ -262,13 +269,50 @@ function monthGrid(year, month, weekStart, todayKey) {
   return weeks
 }
 
+// Capitalize localized date names even when the locale normally writes them
+// in lowercase (for example, Spanish weekdays and months).
+function capitalizeDateNames(text, locale) {
+  var names = []
+  for (var i = 0; i < 7; i++) {
+    names.push(locale.dayName(i, Locale.LongFormat), locale.dayName(i, Locale.ShortFormat))
+  }
+  for (var m = 0; m < 12; m++) {
+    names.push(locale.monthName(m, Locale.LongFormat), locale.monthName(m, Locale.ShortFormat))
+    names.push(locale.standaloneMonthName(m, Locale.LongFormat), locale.standaloneMonthName(m, Locale.ShortFormat))
+  }
+  names.sort(function(a, b) { return b.length - a.length })
+  var result = String(text)
+  for (var n = 0; n < names.length; n++) {
+    var name = String(names[n] || "")
+    if (name.length < 2 || name.charAt(0) === name.charAt(0).toUpperCase()) continue
+    var index = 0
+    while ((index = result.indexOf(name, index)) !== -1) {
+      var before = index > 0 ? result.charAt(index - 1) : ""
+      var after = result.charAt(index + name.length)
+      var beforeLetter = before && before.toUpperCase() !== before.toLowerCase()
+      var afterLetter = after && after.toUpperCase() !== after.toLowerCase()
+      if (!beforeLetter && !afterLetter)
+        result = result.slice(0, index) + name.charAt(0).toUpperCase() + result.slice(index + 1)
+      index += name.length
+    }
+  }
+  return result
+}
+
+// Align clock ticks to epoch boundaries. Unlike local wall-clock scheduling,
+// epoch milliseconds do not repeat during the DST fall-back hour.
+function msUntilNextTick(nowMs, step) {
+  return step - nowMs % step
+}
+
 function stepMonth(year, month, delta) {
-  var target = new Date(year, Number(month) + Number(delta), 1)
-  return { year: target.getFullYear(), month: target.getMonth() }
+  var target = new Date(Date.UTC(year, Number(month) + Number(delta), 1))
+  return { year: target.getUTCFullYear(), month: target.getUTCMonth() }
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
+    msUntilNextTick: msUntilNextTick,
     dateKey: dateKey,
     keyForDate: keyForDate,
     normalizedWeekStart: normalizedWeekStart,
@@ -289,6 +333,7 @@ if (typeof module !== "undefined") {
     monthGrid: monthGrid,
     stepMonth: stepMonth,
     clockFormats: clockFormats,
+    clockNeedsSeconds: clockNeedsSeconds,
     clockFormatRing: clockFormatRing,
     nextClockFormat: nextClockFormat,
     isoWeekLiteral: isoWeekLiteral

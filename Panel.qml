@@ -22,6 +22,7 @@ Panel {
   moduleName: "omarchy-google-calendar-clock"
   ipcTarget: "omarchy-google-calendar-clock"
   manageIpc: false
+  Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
   // Keep this in step with manifest.json so the installed panel can identify
   // its release without reading files from Quickshell's sandbox.
   readonly property string pluginVersion: "0.1.10"
@@ -69,12 +70,12 @@ Panel {
   // starts out matching the rest of the desktop rather than a hardcoded
   // convention. Clicking the grid's "W" heading writes the choice back to
   // shell.json.
-  readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), Qt.locale().firstDayOfWeek)
-  // The interface is English throughout, so day names are not taken from the
-  // system locale. Where the week starts still is: that is a regional
-  // convention rather than a translation, and it stays overridable above.
-  readonly property var labelLocale: Qt.locale("en_US")
-  readonly property string nextWeekStartLabel: labelLocale.dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat)
+  readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), labelLocale.firstDayOfWeek)
+  readonly property var labelLocale: Qt.locale(I18n.formatLocale)
+  readonly property string monthYearLabel: I18n.t("clock.monthYear")
+    .arg(labelLocale.standaloneMonthName(viewMonth, Locale.LongFormat))
+    .arg(viewDate.toLocaleDateString(labelLocale, "yyyy"))
+  readonly property string nextWeekStartLabel: Model.capitalizeDateNames(labelLocale.dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat), labelLocale, today)
   readonly property var weekdays: Model.weekdayOrder(weekStart)
   readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey)
 
@@ -100,17 +101,17 @@ Panel {
   readonly property bool calendarBusy: calendarPulling || calendarPushing
     || calendarCreating || calendarMutating || calendarStatusLoading
   readonly property string calendarBusyLabel: calendarPulling
-    ? "Pulling latest changes from Google…"
-    : calendarPushing ? "Pushing local changes to Google…"
-    : calendarCreating ? "Saving the event…"
-    : calendarMutating ? "Saving changes…"
-    : "Checking sync status…"
+    ? strings.t("message.s0")
+    : calendarPushing ? strings.t("message.s1")
+    : calendarCreating ? strings.t("message.s2")
+    : calendarMutating ? strings.t("message.s3")
+    : strings.t("message.s4")
   readonly property bool calendarProgressVisible: calendarBusy
     || calendarAutoPrefetching || (calendarLoading && calendarEvents.length === 0)
   readonly property string calendarProgressLabel: calendarBusy
     ? calendarBusyLabel
-    : calendarAutoPrefetching ? "Extending cached calendar months…"
-    : "Loading calendar…"
+    : calendarAutoPrefetching ? strings.t("message.s5")
+    : strings.t("message.s6")
   property string calendarPullOutput: ""
   property string calendarAutoPrefetchOutput: ""
   property string calendarScheduledRefreshOutput: ""
@@ -156,11 +157,11 @@ Panel {
   property string expandedAgendaInstanceId: ""
   property real calendarFrozenTop: -1
   readonly property var eventRepeatOptions: [
-    { value: "none", icon: "1", label: "ONCE" },
-    { value: "daily", icon: "D", label: "DAILY" },
-    { value: "weekly", icon: "W", label: "WEEKLY" },
-    { value: "monthly", icon: "M", label: "MONTHLY" },
-    { value: "yearly", icon: "Y", label: "YEARLY" }
+    { value: "none", icon: "1", label: strings.t("message.s16") },
+    { value: "daily", icon: "D", label: strings.t("message.s17") },
+    { value: "weekly", icon: "W", label: strings.t("message.s18") },
+    { value: "monthly", icon: "M", label: strings.t("message.s19") },
+    { value: "yearly", icon: "Y", label: strings.t("message.s20") }
   ]
   readonly property var agendaEvents: calendarEventsByDate[agendaDateKey]
     ? calendarEventsByDate[agendaDateKey].events : []
@@ -356,8 +357,8 @@ Panel {
     var position = root.bar ? root.bar.position : "bottom"
     var top = Style.gapsOut
     var bottom = panel.screenH - Style.gapsOut
-    if (position === "top") top = panel.barH + Style.gapsOut
-    if (position === "bottom") bottom = panel.screenH - panel.barH - Style.gapsOut
+    if (position === "top") top = panel.barThickness + Style.gapsOut
+    if (position === "bottom") bottom = panel.screenH - panel.barThickness - Style.gapsOut
     return { top: top, bottom: Math.max(top + 1, bottom) }
   }
 
@@ -459,11 +460,11 @@ Panel {
 
   function startEditingEvent(event) {
     if (!event || event.calendar_read_only) {
-      calendarSyncMessage = "This calendar is read-only"
+      calendarSyncMessage = strings.t("message.s7")
       return
     }
     if (event.event_read_only) {
-      calendarSyncMessage = "Google does not allow editing this special event type"
+      calendarSyncMessage = strings.t("detail.s49")
       return
     }
     selectedAgendaEvent = event
@@ -504,7 +505,7 @@ Panel {
     if (!/[0-9]/.test(time)) time = ""
     var repeatCount = String(eventRepeatCountField.text || "").trim()
     if (title === "") {
-      calendarSyncMessage = "Enter an event title"
+      calendarSyncMessage = strings.t("message.s8")
       eventTitleField.forceActiveFocus()
       return
     }
@@ -512,12 +513,12 @@ Panel {
       || (selectedAgendaEvent.recurring && eventMutationScope === "series")
     if (scheduleEditable && repeatCount !== ""
         && (!/^\d+$/.test(repeatCount) || Number(repeatCount) < 2 || Number(repeatCount) > 999)) {
-      calendarSyncMessage = "Repeat count must be between 2 and 999"
+      calendarSyncMessage = strings.t("detail.s50")
       eventRepeatCountField.forceActiveFocus()
       return
     }
     if (!root.eventAllDayEditing && !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
-      calendarSyncMessage = "Time must use HH:MM"
+      calendarSyncMessage = strings.t("message.s9")
       eventTimeField.forceActiveFocus()
       return
     }
@@ -577,32 +578,32 @@ Panel {
   }
 
   function mutationTargetLabel() {
-    if (!selectedAgendaEvent || !selectedAgendaEvent.recurring) return "the event"
-    return eventMutationScope === "series" ? "the whole series" : "this event"
+    if (!selectedAgendaEvent || !selectedAgendaEvent.recurring) return strings.t("detail.s0")
+    return eventMutationScope === "series" ? strings.t("detail.s1") : strings.t("detail.s2")
   }
 
   function deleteConfirmationMessage() {
     if (!selectedAgendaEvent || !selectedAgendaEvent.recurring)
-      return "Delete this event locally?"
+      return strings.t("detail.s3")
     if (eventMutationScope === "series")
-      return "Delete this whole recurring series locally?"
-    return "Delete only this event from the recurring series?"
+      return strings.t("detail.s4")
+    return strings.t("detail.s5")
   }
 
   function deleteTooltipText() {
     if (calendarDeleteArmed)
-      return "Click again to confirm deleting " + mutationTargetLabel()
+      return strings.t("dynamic.confirmDelete").arg(mutationTargetLabel())
     if (!selectedAgendaEvent || !selectedAgendaEvent.recurring)
-      return "Delete event locally"
+      return strings.t("detail.s6")
     return eventMutationScope === "series"
-      ? "Delete the whole recurring series locally"
-      : "Delete only this event locally"
+      ? strings.t("detail.s7")
+      : strings.t("detail.s8")
   }
 
   function eventRepeatLabel() {
     for (var i = 0; i < eventRepeatOptions.length; i++)
       if (eventRepeatOptions[i].value === eventRepeatMode) return eventRepeatOptions[i].label
-    return "ONCE"
+    return strings.t("message.s16")
   }
 
   function recurrenceModeFromRule(rule) {
@@ -633,10 +634,10 @@ Panel {
   function eventTooltip(dateKey) {
     var entry = calendarEventsByDate[dateKey]
     var events = entry ? entry.events : []
-    if (events.length === 0) return "No events"
+    if (events.length === 0) return strings.t("detail.s9")
     var titles = []
-    for (var i = 0; i < events.length && i < 3; i++) titles.push(String(events[i].title || "Untitled event"))
-    if (events.length > titles.length) titles.push("+" + (events.length - titles.length) + " more")
+    for (var i = 0; i < events.length && i < 3; i++) titles.push(String(events[i].title || strings.t("message.s10")))
+    if (events.length > titles.length) titles.push(strings.t("dynamic.more").arg(events.length - titles.length))
     return titles.join("\n")
   }
 
@@ -705,7 +706,7 @@ Panel {
   }
 
   function eventTimeLabel(event) {
-    if (event && event.all_day) return "ALL DAY"
+    if (event && event.all_day) return strings.t("message.s11")
     var start = new Date(event && event.start)
     if (isNaN(start.getTime())) return ""
     return Qt.formatTime(start, "HH:mm")
@@ -796,15 +797,15 @@ Panel {
     if (notified[notifyKey]) return false
     notified[notifyKey] = new Date().toISOString()
 
-    var title = String(event.title || "Untitled event")
+    var title = String(event.title || strings.t("message.s10"))
     var timeLabel = root.eventTimeLabel(event)
     var headline, description
     if (when === "5") {
-      headline = "Starting in 5 minutes"
-      description = title + (timeLabel !== "" ? " at " + timeLabel : "")
+      headline = strings.t("detail.s10")
+      description = timeLabel !== "" ? strings.t("dynamic.atTime").arg(title).arg(timeLabel) : title
     } else {
       headline = title
-      description = "Starting now" + (timeLabel !== "" ? " at " + timeLabel : "")
+      description = timeLabel !== "" ? strings.t("dynamic.atTime").arg(strings.t("detail.s11")).arg(timeLabel) : strings.t("detail.s11")
     }
     var links = CalendarModel.eventMeetingLinks(event)
     if (links.length > 0) description += "\n" + links[0]
@@ -815,9 +816,9 @@ Panel {
   }
 
   function lastPullLabel() {
-    if (lastCalendarPull === "") return "Not pulled from Google yet"
+    if (lastCalendarPull === "") return strings.t("detail.s12")
     var date = new Date(lastCalendarPull)
-    return isNaN(date.getTime()) ? "Pulled from Google" : "Last pull: " + Qt.formatDateTime(date, "d MMM, HH:mm")
+    return isNaN(date.getTime()) ? strings.t("detail.s13") : strings.t("dynamic.lastPull").arg(date.toLocaleString(labelLocale, "d MMM, HH:mm"))
   }
 
   function pullFromGoogle() {
@@ -825,11 +826,11 @@ Panel {
         || calendarScheduledRefreshProcess.running) return
     if (root.calendarRuntimeMissing) {
       root.probeCalendarRuntime()
-      root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      root.calendarSyncMessage = strings.t("detail.s14")
       return
     }
     calendarPulling = true
-    calendarSyncMessage = "Pulling latest changes from Google…"
+    calendarSyncMessage = strings.t("message.s0")
     calendarPullOutput = ""
     calendarPullProcess.command = [
       root.helperPath("calendar-pull"), "--pending", prefetchStartDate(), prefetchEndDate()
@@ -841,12 +842,12 @@ Panel {
     if (calendarPushProcess.running) return
     if (root.calendarRuntimeMissing) {
       root.probeCalendarRuntime()
-      root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      root.calendarSyncMessage = strings.t("detail.s14")
       return
     }
     if (!calendarPushArmed) {
       calendarPushArmed = true
-      calendarSyncMessage = "Push pending local changes to Google? Click upload again to confirm"
+      calendarSyncMessage = strings.t("detail.s15")
       calendarPushConfirmation.restart()
       return
     }
@@ -854,7 +855,7 @@ Panel {
     calendarPushArmed = false
     calendarPushing = true
     calendarPushOutput = ""
-    calendarSyncMessage = "Pushing local changes to Google…"
+    calendarSyncMessage = strings.t("message.s1")
     calendarPushProcess.command = [root.helperPath("calendar-push"), "--confirm"]
     calendarPushProcess.running = true
   }
@@ -915,11 +916,11 @@ Panel {
     if (calendarStatusProcess.running) return
     if (root.calendarRuntimeMissing) {
       root.probeCalendarRuntime()
-      root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+      root.calendarSyncMessage = strings.t("detail.s14")
       return
     }
     calendarStatusLoading = true
-    calendarSyncMessage = "Checking sync status…"
+    calendarSyncMessage = strings.t("message.s4")
     calendarStatusOutput = ""
     calendarStatusEntries = []
     calendarStatusProcess.command = [root.helperPath("calendar-status")]
@@ -1067,7 +1068,7 @@ Panel {
     onExited: function(exitCode) {
       root.calendarLoading = false
       if (exitCode !== 0 && root.calendarError === "")
-        root.calendarError = "Calendar refresh failed"
+        root.calendarError = strings.t("detail.s16")
       if (exitCode === 0) root.maybeExtendCalendarCache()
     }
   }
@@ -1092,9 +1093,9 @@ Panel {
         calendarReloadAfterPull.restart()
       } else if (exitCode === 127) {
         root.calendarRuntimeMissing = true
-        root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+        root.calendarSyncMessage = strings.t("detail.s14")
       } else {
-        root.calendarSyncMessage = root.calendarPullOutput || "Google pull failed"
+        root.calendarSyncMessage = root.calendarPullOutput || strings.t("detail.s17")
       }
     }
   }
@@ -1114,7 +1115,7 @@ Panel {
       if (exitCode === 0)
         calendarReloadAfterPull.restart()
       else
-        root.calendarSyncMessage = root.calendarAutoPrefetchOutput || "Could not extend the local calendar cache"
+        root.calendarSyncMessage = root.calendarAutoPrefetchOutput || strings.t("detail.s18")
     }
   }
 
@@ -1135,9 +1136,9 @@ Panel {
       } else if (exitCode === 127) {
         root.calendarRuntimeMissing = true
         if (root.calendarEvents.length === 0)
-          root.calendarError = "Caldir runtime is not installed — run setup first"
+          root.calendarError = strings.t("detail.s14")
       } else if (root.calendarEvents.length === 0) {
-        root.calendarError = root.calendarScheduledRefreshOutput || "Could not initialize the calendar cache"
+        root.calendarError = root.calendarScheduledRefreshOutput || strings.t("detail.s19")
       }
     }
   }
@@ -1157,11 +1158,11 @@ Panel {
       if (exitCode === 0) {
         root.editingEvent = false
         root.calendarSyncMessage = root.eventRepeatMode === "none"
-          ? "Saved event locally — Push to Google when you are ready"
-          : "Saved recurring event locally — Push to Google when you are ready"
+          ? strings.t("detail.s20")
+          : strings.t("detail.s21")
         calendarReloadAfterPull.restart()
       } else {
-        root.calendarSyncMessage = root.calendarCreateOutput || "Could not save the local event"
+        root.calendarSyncMessage = root.calendarCreateOutput || strings.t("detail.s22")
       }
     }
   }
@@ -1185,11 +1186,11 @@ Panel {
         root.selectedAgendaEvent = null
         root.calendarDeleteArmed = false
         root.calendarSyncMessage = action === "delete"
-          ? "Deleted " + target + " locally — Push to Google when you are ready"
-          : "Updated " + target + " locally — Push to Google when you are ready"
+          ? strings.t("dynamic.deleted").arg(target)
+          : strings.t("dynamic.updated").arg(target)
         calendarReloadAfterPull.restart()
       } else {
-        root.calendarSyncMessage = root.calendarMutationOutput || "Could not change the local event"
+        root.calendarSyncMessage = root.calendarMutationOutput || strings.t("detail.s23")
       }
     }
   }
@@ -1207,15 +1208,15 @@ Panel {
     onExited: function(exitCode) {
       root.calendarPushing = false
       if (exitCode === 0) {
-        root.calendarSyncMessage = "Pushed local changes to Google"
+        root.calendarSyncMessage = strings.t("detail.s24")
         root.calendarStatusEntries = []
         root.calendarStatusOutput = ""
         calendarReloadAfterPull.restart()
       } else if (exitCode === 127) {
         root.calendarRuntimeMissing = true
-        root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+        root.calendarSyncMessage = strings.t("detail.s14")
       } else {
-        root.calendarSyncMessage = root.calendarPushOutput || "Could not push local changes to Google"
+        root.calendarSyncMessage = root.calendarPushOutput || strings.t("detail.s25")
       }
     }
   }
@@ -1227,7 +1228,7 @@ Panel {
     onTriggered: {
       root.calendarPushArmed = false
       if (!root.calendarPushing)
-        root.calendarSyncMessage = "Google push cancelled"
+        root.calendarSyncMessage = strings.t("detail.s26")
     }
   }
 
@@ -1238,7 +1239,7 @@ Panel {
     onTriggered: {
       root.calendarDeleteArmed = false
       if (!root.calendarMutating)
-        root.calendarSyncMessage = "Deletion cancelled"
+        root.calendarSyncMessage = strings.t("detail.s27")
     }
   }
 
@@ -1296,12 +1297,12 @@ Panel {
       root.calendarStatusLoading = false
       if (exitCode === 0) {
         root.calendarStatusEntries = root.parseCalendarStatus(root.calendarStatusOutput)
-        root.calendarSyncMessage = root.calendarStatusEntries.length > 0 ? "" : "No pending calendar changes"
+        root.calendarSyncMessage = root.calendarStatusEntries.length > 0 ? "" : strings.t("detail.s28")
       } else if (exitCode === 127) {
         root.calendarRuntimeMissing = true
-        root.calendarSyncMessage = "Caldir runtime is not installed — run setup first"
+        root.calendarSyncMessage = strings.t("detail.s14")
       } else {
-        root.calendarSyncMessage = root.calendarStatusOutput || "Could not check sync status"
+        root.calendarSyncMessage = root.calendarStatusOutput || strings.t("detail.s29")
       }
     }
   }
@@ -1327,7 +1328,7 @@ Panel {
     onExited: function(exitCode) {
       root.authStatusLoading = false
       if (exitCode !== 0) {
-        root.authStatusError = root.authStatusOutput || "Could not read Google OAuth settings"
+        root.authStatusError = root.authStatusOutput || strings.t("detail.s30")
         return
       }
       try {
@@ -1336,7 +1337,7 @@ Panel {
         root.authSession = String(status.session || "")
         root.authStatusError = ""
       } catch (error) {
-        root.authStatusError = "Could not read Google OAuth settings"
+        root.authStatusError = strings.t("detail.s30")
       }
     }
   }
@@ -1351,7 +1352,7 @@ Panel {
     }
     onExited: function(exitCode) {
       if (exitCode !== 0)
-        root.calendarSyncMessage = "Could not send the event notification"
+        root.calendarSyncMessage = strings.t("detail.s31")
     }
   }
 
@@ -1364,6 +1365,15 @@ Panel {
     property: "y"
     when: root.calendarPanelPosition === "screen-center"
     value: root.calendarFrozenTop >= 0 ? root.calendarFrozenTop : root.calendarCenteredTop()
+  }
+
+  // RC2 clips the entire card while its height animates upward. The settings
+  // card lives outside that card's bounds, so keep it visible during growth.
+  Binding {
+    target: keyCatcher.parent && keyCatcher.parent.parent ? keyCatcher.parent.parent : null
+    property: "clip"
+    when: root.settingsOpen && panel.morph >= 1
+    value: false
   }
 
   // On a left or right bar KeyboardPanel already centers the card vertically,
@@ -1474,7 +1484,7 @@ Panel {
               Text {
                 id: heroDate
                 anchors.verticalCenter: parent.verticalCenter
-                text: Qt.formatDate(root.today, "MMMM d")
+                text: Model.capitalizeDateNames(root.today.toLocaleDateString(root.labelLocale, I18n.t("clock.dayMonthFormat")), root.labelLocale, root.today)
                 color: heroMouse.containsMouse
                   ? Style.hoverStateColor(root.contentForeground, Color.accent)
                   : root.contentForeground
@@ -1497,7 +1507,7 @@ Panel {
 
               PanelToolTip {
                 visible: heroMouse.containsMouse
-                text: "Back to today"
+                text: I18n.t("clock.backToToday")
                 fontFamily: root.contentFontFamily
               }
             }
@@ -1506,7 +1516,7 @@ Panel {
               anchors.top: parent.top
               anchors.right: parent.right
               iconText: "󰒓"
-              tooltipText: root.settingsOpen ? "Close calendar settings" : "Calendar settings"
+              tooltipText: root.settingsOpen ? strings.t("settings.close") : strings.t("settings.title")
               foreground: root.settingsOpen ? Color.accent : root.contentForeground
               fontFamily: root.contentFontFamily
               focusable: true
@@ -1541,7 +1551,7 @@ Panel {
 
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  text: "BORN"
+                  text: I18n.t("clock.born")
                   color: Qt.darker(root.contentForeground, 1.5)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -1552,7 +1562,7 @@ Panel {
                   id: bornField
                   width: Style.space(70)
                   anchors.verticalCenter: parent.verticalCenter
-                  placeholderText: "year"
+                  placeholderText: I18n.t("clock.year")
                   foreground: root.contentForeground
                   font.family: root.contentFontFamily
                   inputMethodHints: Qt.ImhDigitsOnly
@@ -1564,7 +1574,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                   anchors.verticalCenterOffset: 0
                   leftPadding: Style.space(6)
-                  text: "LIVE TO"
+                  text: I18n.t("clock.liveTo")
                   color: Qt.darker(root.contentForeground, 1.5)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -1589,7 +1599,7 @@ Panel {
                 visible: !root.editingLife
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.today.getFullYear()
+                text: I18n.formatNumber(root.today.getFullYear())
                 color: Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1601,7 +1611,7 @@ Panel {
                 visible: !root.editingLife
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.yearDonePercent + "%"
+                text: I18n.formatNumber(root.yearDonePercent) + "%"
                 color: root.contentForeground
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1649,7 +1659,7 @@ Panel {
                 id: lifeLabel
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: "LIFE"
+                text: I18n.t("clock.life")
                 color: Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1660,7 +1670,7 @@ Panel {
                 id: lifePercent
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.lifeDonePercent + "%"
+                text: I18n.formatNumber(root.lifeDonePercent) + "%"
                 color: root.contentForeground
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1747,7 +1757,7 @@ Panel {
 
                   Text {
                     anchors.centerIn: parent
-                    text: "W"
+                    text: I18n.t("clock.weekShort")
                     color: weekStartMouse.containsMouse
                       ? Style.hoverStateColor(root.contentForeground, Color.accent)
                       : Qt.darker(root.contentForeground, 1.9)
@@ -1767,7 +1777,7 @@ Panel {
 
                   PanelToolTip {
                     visible: weekStartMouse.containsMouse
-                    text: "Start weeks on " + root.nextWeekStartLabel
+                    text: I18n.t("clock.startWeeksOn").arg(root.nextWeekStartLabel)
                     fontFamily: root.contentFontFamily
                   }
                 }
@@ -1808,7 +1818,7 @@ Panel {
                     height: root.cellHeight
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
-                    text: modelData.week
+                    text: I18n.formatNumber(modelData.week)
                     color: Qt.darker(root.contentForeground, 1.9)
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.caption
@@ -1839,7 +1849,7 @@ Panel {
 
                       Text {
                         anchors.centerIn: parent
-                        text: modelData.day
+                        text: I18n.formatNumber(modelData.day)
                         color: modelData.inMonth
                           ? (modelData.weekend ? Qt.darker(root.contentForeground, 1.45) : root.contentForeground)
                           : Qt.darker(root.contentForeground, 2.2)
@@ -1923,7 +1933,7 @@ Panel {
                 // "MAY 2026" and a "SEPTEMBER 2026".
                 width: Style.space(130)
                 horizontalAlignment: Text.AlignHCenter
-                text: Qt.formatDate(root.viewDate, "MMMM yyyy").toUpperCase()
+                text: root.monthYearLabel.toUpperCase()
                 color: Qt.darker(root.contentForeground, 1.4)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.body
@@ -1936,8 +1946,8 @@ Panel {
                 anchors.left: parent.left
                 anchors.leftMargin: -Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                iconText: "󰅁"
-                tooltipText: "Previous month"
+                iconText: I18n.rightToLeft ? "󰅂" : "󰅁"
+                tooltipText: I18n.t("clock.previousMonth")
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 onClicked: root.moveMonth(-1)
@@ -1947,8 +1957,8 @@ Panel {
                 anchors.right: parent.right
                 anchors.rightMargin: -Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                iconText: "󰅂"
-                tooltipText: "Next month"
+                iconText: I18n.rightToLeft ? "󰅁" : "󰅂"
+                tooltipText: I18n.t("clock.nextMonth")
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 onClicked: root.moveMonth(1)
@@ -1983,7 +1993,7 @@ Panel {
                 id: agendaLabel
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: Qt.formatDate(new Date(root.agendaDateKey + "T12:00:00"), "dddd, MMMM d").toUpperCase()
+                text: new Date(root.agendaDateKey + "T12:00:00").toLocaleDateString(root.labelLocale, "dddd, d MMMM").toUpperCase()
                 color: Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1997,7 +2007,7 @@ Panel {
 
                 PanelActionButton {
                   iconText: "󰐕"
-                  tooltipText: "Add local event on " + root.agendaDateKey
+                  tooltipText: strings.t("dynamic.addEvent").arg(root.agendaDateKey)
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
                   enabled: !root.editingEvent && !root.calendarCreating && !root.calendarMutating
@@ -2006,7 +2016,7 @@ Panel {
 
                 PanelActionButton {
                   iconText: "󰄬"
-                  tooltipText: "Check sync status"
+                  tooltipText: strings.t("agenda.checkSync")
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarStatusLoading && !root.calendarPulling
@@ -2016,7 +2026,7 @@ Panel {
 
                 PanelActionButton {
                   iconText: "↓"
-                  tooltipText: "Pull latest from Google"
+                  tooltipText: strings.t("agenda.pull")
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarPulling && !root.calendarAutoPrefetching
@@ -2027,8 +2037,8 @@ Panel {
                 PanelActionButton {
                   iconText: "↑"
                   tooltipText: root.calendarPushArmed
-                    ? "Click again to push local changes to Google"
-                    : "Push local changes to Google (confirmation required)"
+                    ? strings.t("message.s26")
+                    : strings.t("message.s27")
                   foreground: root.calendarPushArmed ? Color.accent : root.contentForeground
                   fontFamily: root.contentFontFamily
                   enabled: !root.calendarPushing && !root.calendarPulling
@@ -2068,7 +2078,7 @@ Panel {
                 Text {
                   width: parent.width
                   wrapMode: Text.Wrap
-                  text: "Google sync needs setup. Choose how Google OAuth should work:"
+                  text: strings.t("detail.s32")
                   color: root.barForeground
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
@@ -2078,8 +2088,8 @@ Panel {
                   spacing: Style.space(6)
 
                   Button {
-                    text: "Direct setup"
-                    tooltipText: "Use your own Google Cloud OAuth client"
+                    text: strings.t("message.s24")
+                    tooltipText: strings.t("detail.s33")
                     fontSize: Style.font.caption
                     horizontalPadding: Style.space(6)
                     verticalPadding: Style.space(2)
@@ -2090,8 +2100,8 @@ Panel {
                   }
 
                   Button {
-                    text: "Hosted setup"
-                    tooltipText: "Use caldir.org's hosted OAuth relay"
+                    text: strings.t("message.s25")
+                    tooltipText: strings.t("detail.s34")
                     fontSize: Style.font.caption
                     horizontalPadding: Style.space(6)
                     verticalPadding: Style.space(2)
@@ -2105,7 +2115,7 @@ Panel {
                 Text {
                   width: parent.width
                   wrapMode: Text.Wrap
-                  text: "Direct uses your own Google Cloud client and keeps token refreshes between this machine and Google. Hosted needs no client, but caldir.org relays sign-in and future token refreshes."
+                  text: strings.t("detail.s35")
                   color: Qt.darker(root.barForeground, 1.5)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
@@ -2138,7 +2148,7 @@ Panel {
                     }
 
                     Text {
-                      text: modelData.slug + (modelData.readOnly ? " (read-only)" : "")
+                      text: modelData.readOnly ? strings.t("dynamic.readOnly").arg(modelData.slug) : modelData.slug
                       color: Qt.darker(root.contentForeground, 1.5)
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
@@ -2170,7 +2180,7 @@ Panel {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "APPLY TO"
+                text: strings.t("editor.applyTo")
                 color: Qt.darker(root.contentForeground, 1.6)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
@@ -2179,7 +2189,7 @@ Panel {
 
               PanelActionButton {
                 iconText: "1"
-                tooltipText: "Apply edits or deletion only to this event"
+                tooltipText: strings.t("detail.s36")
                 foreground: root.eventMutationScope === "instance" ? Color.accent : root.contentForeground
                 fontFamily: root.contentFontFamily
                 bordered: true
@@ -2194,7 +2204,7 @@ Panel {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "THIS EVENT"
+                text: strings.t("editor.thisEvent")
                 color: root.eventMutationScope === "instance" ? Color.accent : Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
@@ -2202,7 +2212,7 @@ Panel {
 
               PanelActionButton {
                 iconText: "∞"
-                tooltipText: "Apply edits or deletion to the whole recurring series"
+                tooltipText: strings.t("detail.s37")
                 foreground: root.eventMutationScope === "series" ? Color.accent : root.contentForeground
                 fontFamily: root.contentFontFamily
                 bordered: true
@@ -2217,7 +2227,7 @@ Panel {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "WHOLE SERIES"
+                text: strings.t("editor.wholeSeries")
                 color: root.eventMutationScope === "series" ? Color.accent : Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
@@ -2231,7 +2241,7 @@ Panel {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.selectedAgendaEvent ? "SCHEDULE" : "REPEAT"
+                text: root.selectedAgendaEvent ? strings.t("editor.schedule") : strings.t("editor.repeat")
                 color: Qt.darker(root.contentForeground, 1.6)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
@@ -2245,8 +2255,8 @@ Panel {
                   required property var modelData
                   iconText: modelData.icon
                   tooltipText: modelData.value === "none"
-                    ? (root.selectedAgendaEvent ? "A recurring series cannot be converted to one event here" : "Create one event")
-                    : "Repeat " + modelData.label.toLowerCase()
+                    ? (root.selectedAgendaEvent ? strings.t("detail.s38") : strings.t("detail.s39"))
+                    : strings.t("dynamic.repeat").arg(modelData.label.toLowerCase())
                   foreground: root.eventRepeatMode === modelData.value ? Color.accent : root.contentForeground
                   fontFamily: root.contentFontFamily
                   bordered: true
@@ -2273,7 +2283,7 @@ Panel {
               Text {
                 visible: root.eventRepeatMode !== "none"
                 anchors.verticalCenter: parent.verticalCenter
-                text: "TIMES"
+                text: strings.t("editor.times")
                 color: Qt.darker(root.contentForeground, 1.6)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
@@ -2308,7 +2318,7 @@ Panel {
                 width: parent.width - eventAllDayButton.width - eventTimeField.width
                   - eventSaveButton.width - eventCancelButton.width
                   - (root.selectedAgendaEvent ? eventDeleteButton.width + Style.space(6) : 0) - Style.space(24)
-                placeholderText: "Event title"
+                placeholderText: strings.t("editor.title")
                 foreground: root.contentForeground
                 font.family: root.contentFontFamily
                 Keys.onReturnPressed: root.saveLocalEvent()
@@ -2319,7 +2329,7 @@ Panel {
               PanelActionButton {
                 id: eventAllDayButton
                 iconText: root.eventAllDayEditing ? "A" : "T"
-                tooltipText: root.eventAllDayEditing ? "All-day event (click for a time)" : "Timed event (click for all day)"
+                tooltipText: root.eventAllDayEditing ? strings.t("detail.s40") : strings.t("detail.s41")
                 foreground: root.eventAllDayEditing ? Color.accent : root.contentForeground
                 fontFamily: root.contentFontFamily
                 fontSize: Style.font.caption
@@ -2341,7 +2351,7 @@ Panel {
               TextField {
                 id: eventTimeField
                 width: Style.space(70)
-                placeholderText: root.eventAllDayEditing ? "ALL DAY" : "HH:MM"
+                placeholderText: root.eventAllDayEditing ? strings.t("message.s11") : "HH:MM"
                 foreground: root.contentForeground
                 font.family: root.contentFontFamily
                 enabled: !root.eventAllDayEditing && !root.calendarCreating && !root.calendarMutating
@@ -2380,7 +2390,7 @@ Panel {
               PanelActionButton {
                 id: eventSaveButton
                 iconText: "󰄬"
-                tooltipText: root.selectedAgendaEvent ? "Save local changes" : "Save locally"
+                tooltipText: root.selectedAgendaEvent ? strings.t("message.s21") : strings.t("message.s22")
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 focusable: true
@@ -2404,7 +2414,7 @@ Panel {
               PanelActionButton {
                 id: eventCancelButton
                 iconText: "󰅖"
-                tooltipText: "Cancel"
+                tooltipText: strings.t("editor.cancel")
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 focusable: true
@@ -2418,9 +2428,9 @@ Panel {
               visible: root.editingEvent
               width: parent.width
               height: visible ? Style.space(52) : 0
-              placeholderText: root.eventTitleOnlyEditing
-                ? "Descriptions cannot be changed for Google birthdays"
-                : "Description (optional)"
+                placeholderText: root.eventTitleOnlyEditing
+                ? strings.t("editor.birthdayDescription")
+                : strings.t("editor.description")
               color: root.contentForeground
               placeholderTextColor: Qt.darker(root.contentForeground, 1.6)
               selectionColor: Style.selectionFillFor(root.contentForeground, Color.accent)
@@ -2464,7 +2474,7 @@ Panel {
 
             Text {
               visible: !root.editingEvent && !root.calendarLoading && root.calendarError === "" && root.agendaEvents.length === 0
-              text: "No events"
+              text: strings.t("agenda.empty")
               color: Qt.darker(root.contentForeground, 1.7)
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.bodySmall
@@ -2541,7 +2551,7 @@ Panel {
                         anchors.right: descriptionChevron.visible ? descriptionChevron.left : parent.right
                         anchors.rightMargin: descriptionChevron.visible ? Style.space(5) : 0
                         elide: Text.ElideRight
-                        text: String(modelData.title || "Untitled event")
+                        text: String(modelData.title || strings.t("message.s10"))
                         color: agendaEvent.isNextEvent
                           ? Style.selectedStateColor(root.contentForeground, Color.accent)
                           : root.contentForeground
@@ -2574,7 +2584,7 @@ Panel {
 Button {
                       id: joinAgendaButton
                       visible: agendaEvent.meetingLinks.length > 0
-                      text: "JOIN"
+                      text: strings.t("agenda.join")
                       fontSize: Style.font.caption
                       horizontalPadding: Style.space(6)
                       verticalPadding: Style.space(3)
@@ -2593,7 +2603,7 @@ Button {
                       id: editAgendaButton
                       visible: !modelData.calendar_read_only && !modelData.event_read_only
                       iconText: "󰏫"
-                      tooltipText: modelData.recurring ? "Edit this event or the whole series locally" : "Edit event locally"
+                      tooltipText: modelData.recurring ? strings.t("detail.s42") : strings.t("message.s23")
                       foreground: root.contentForeground
                       fontFamily: root.contentFontFamily
                       enabled: !root.calendarCreating && !root.calendarMutating
@@ -2715,7 +2725,7 @@ Button {
               id: settingsTitle
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
-              text: "CALENDAR SETTINGS"
+              text: strings.t("settings.heading")
               color: root.contentForeground
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.bodySmall
@@ -2728,7 +2738,7 @@ Button {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               iconText: "󰅖"
-              tooltipText: "Close calendar settings"
+              tooltipText: strings.t("settings.close")
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
               focusable: true
@@ -2745,7 +2755,7 @@ Button {
 
           Text {
             width: parent.width
-            text: "PANEL POSITION"
+            text: strings.t("settings.position")
             color: Qt.darker(root.contentForeground, 1.5)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2758,8 +2768,8 @@ Button {
             SettingsChoiceButton {
               optionValue: "screen-center"
               currentValue: root.calendarPanelPosition
-              text: "SCREEN CENTER"
-              tooltipText: "Center the calendar vertically on the screen"
+              text: strings.t("settings.center")
+              tooltipText: strings.t("detail.s43")
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2771,8 +2781,8 @@ Button {
             SettingsChoiceButton {
               optionValue: "original"
               currentValue: root.calendarPanelPosition
-              text: "ORIGINAL"
-              tooltipText: "Place the calendar beside the bar like Omarchy's clock"
+              text: strings.t("settings.original")
+              tooltipText: strings.t("detail.s44")
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2786,8 +2796,8 @@ Button {
             width: parent.width
             wrapMode: Text.Wrap
             text: root.calendarPanelPosition === "screen-center"
-              ? "The calendar is vertically centered on the screen."
-              : "The calendar uses Omarchy's original clock position beside the bar."
+              ? strings.t("settings.centerDescription")
+              : strings.t("settings.originalDescription")
             color: Qt.darker(root.contentForeground, 1.65)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2802,7 +2812,7 @@ Button {
 
           Text {
             width: parent.width
-            text: "GOOGLE OAUTH"
+            text: strings.t("settings.oauth")
             color: Qt.darker(root.contentForeground, 1.5)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2813,10 +2823,10 @@ Button {
             width: parent.width
             wrapMode: Text.Wrap
             text: root.authStatusLoading
-              ? "Checking authentication…"
+              ? strings.t("message.s12")
               : root.authStatusError !== "" ? root.authStatusError
-              : root.authMode === "none" ? "Not connected"
-              : (root.authMode === "hosted" ? "Hosted" : "Direct")
+              : root.authMode === "none" ? strings.t("message.s13")
+              : (root.authMode === "hosted" ? strings.t("message.s14") : strings.t("message.s15"))
                 + (root.authSession !== "" ? " · " + root.authSession : "")
             color: Qt.darker(root.contentForeground, 1.35)
             font.family: root.contentFontFamily
@@ -2829,8 +2839,8 @@ Button {
             SettingsChoiceButton {
               optionValue: "hosted"
               currentValue: root.authMode
-              text: "HOSTED"
-              tooltipText: "Authenticate through caldir.org"
+              text: strings.t("settings.hosted")
+              tooltipText: strings.t("detail.s45")
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2843,8 +2853,8 @@ Button {
             SettingsChoiceButton {
               optionValue: "direct"
               currentValue: root.authMode
-              text: "DIRECT"
-              tooltipText: "Authenticate directly with your Google OAuth client"
+              text: strings.t("settings.direct")
+              tooltipText: strings.t("detail.s46")
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2858,7 +2868,7 @@ Button {
           Text {
             width: parent.width
             wrapMode: Text.Wrap
-            text: "Switching signs out the current session and opens the interactive setup flow. Stored direct credentials are preserved."
+            text: strings.t("settings.authDescription")
             color: Qt.darker(root.contentForeground, 1.65)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2873,7 +2883,7 @@ Button {
 
           Text {
             width: parent.width
-            text: "CALENDAR COLORS"
+            text: strings.t("settings.colors")
             color: Qt.darker(root.contentForeground, 1.5)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2887,7 +2897,7 @@ Button {
               optionValue: "google"
               currentValue: root.calendarColorMode
               text: "GOOGLE"
-              tooltipText: "Use each calendar's color from Google Calendar"
+              tooltipText: strings.t("detail.s47")
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2899,8 +2909,8 @@ Button {
             SettingsChoiceButton {
               optionValue: "theme"
               currentValue: root.calendarColorMode
-              text: "THEME"
-              tooltipText: "Use two colors from the active Omarchy theme"
+              text: strings.t("settings.theme")
+              tooltipText: strings.t("detail.s48")
               foreground: root.contentForeground
               background: Color.popups.background
               accent: Color.accent
@@ -2932,7 +2942,7 @@ Button {
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "Follows the active Omarchy theme"
+              text: strings.t("settings.followsTheme")
               color: Qt.darker(root.contentForeground, 1.65)
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
@@ -2948,7 +2958,7 @@ Button {
 
           Text {
             width: parent.width
-            text: "REMOVE PLUGIN"
+            text: strings.t("settings.removeHeading")
             color: Qt.darker(root.contentForeground, 1.5)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
@@ -2958,15 +2968,15 @@ Button {
           Text {
             width: parent.width
             wrapMode: Text.Wrap
-            text: "Remove this widget, restore the built-in clock in the bar center, and choose whether to delete Google credentials and calendar data."
+            text: strings.t("settings.removeDescription")
             color: Qt.darker(root.contentForeground, 1.65)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
           }
 
           Button {
-            text: "Remove plugin and data…"
-            tooltipText: "Open the interactive full-uninstall flow"
+            text: strings.t("settings.remove")
+            tooltipText: strings.t("settings.removeTooltip")
             foreground: root.contentForeground
             background: Color.popups.background
             accent: Color.accent
